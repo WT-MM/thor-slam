@@ -1,0 +1,1 @@
+recursive-include thor_slam/ *.py *.txt py.typed MANIFEST.in
