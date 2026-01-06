@@ -286,6 +286,9 @@ class LuxonisCameraSource(CameraSource):
             # Get right frame
             right_data = self._output_queues["right"].get()
             right_frame = right_data.getCvFrame()  # type: ignore[attr-defined]
+
+            # note that getTimestamp() is fixed to the host machine's clock
+            # so comparison to other cameras is meaningful if they are on the same machine.
             right_timestamp = right_data.getTimestamp()  # type: ignore[attr-defined]
             right_seq = right_data.getSequenceNum()  # type: ignore[attr-defined]
 

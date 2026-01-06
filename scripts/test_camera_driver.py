@@ -2,13 +2,17 @@
 """Test script for Luxonis camera driver - tests both stereo and mono modes."""
 
 import argparse
+import asyncio
+import threading
 import time
 import traceback
 from collections import defaultdict
+from collections.abc import Callable
 
 import cv2
 import depthai as dai
 import numpy as np
+from askin import KeyboardController
 
 from thor_slam.camera.drivers.luxonis import LuxonisCameraConfig, LuxonisCameraSource, LuxonisResolution
 
@@ -27,6 +31,19 @@ def draw_fps(image: cv2.Mat | np.ndarray, fps: float, label: str = "") -> cv2.Ma
     return img_copy
 
 
+def draw_fps_and_timestamp(
+    image: cv2.Mat | np.ndarray, fps: float, timestamp: float, label: str = ""
+) -> cv2.Mat | np.ndarray:
+    """Draw FPS and timestamp text on image."""
+    img_copy = image.copy()
+    fps_text = f"{label}FPS: {fps:.1f}" if label else f"FPS: {fps:.1f}"
+    # Format timestamp as seconds with 3 decimal places
+    ts_text = f"TS: {timestamp:.3f}s"
+    cv2.putText(img_copy, fps_text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+    cv2.putText(img_copy, ts_text, (10, 70), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2)
+    return img_copy
+
+
 def calculate_fps(frame_times: list[float], window_size: int = 30) -> float:
     """Calculate FPS from recent frame times."""
     if len(frame_times) < 2:
@@ -40,7 +57,76 @@ def calculate_fps(frame_times: list[float], window_size: int = 30) -> float:
     return (len(recent_times) - 1) / time_diff
 
 
-def test_stereo_camera(ip: str, resolution_name: str = "720", fps: int = 30) -> None:
+def setup_quit_listener() -> tuple[threading.Event, Callable[[], None]]:
+    """Set up askin to listen for 'q' key press.
+
+    Returns:
+        A tuple of (quit_event, cleanup_function).
+        The cleanup function should be called before exiting to properly stop the controller.
+    """
+    quit_event = threading.Event()
+    controller: KeyboardController | None = None
+    loop_ref: list[asyncio.AbstractEventLoop | None] = [None]
+    thread: threading.Thread | None = None
+
+    async def key_handler(key: str) -> None:
+        if key == "q":
+            quit_event.set()
+
+    async def run_controller() -> None:
+        nonlocal controller
+        controller = KeyboardController(key_handler=key_handler, timeout=0.001)
+        await controller.start()
+        # Keep the event loop running until quit
+        try:
+            while not quit_event.is_set():
+                await asyncio.sleep(0.1)
+        finally:
+            if controller:
+                try:
+                    await controller.stop()
+                except Exception:
+                    pass
+
+    def run_async() -> None:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        loop_ref[0] = loop
+        try:
+            loop.run_until_complete(run_controller())
+        except Exception:
+            pass
+        finally:
+            # Cancel all pending tasks before closing
+            try:
+                if loop and not loop.is_closed():
+                    pending = asyncio.all_tasks(loop)
+                    for task in pending:
+                        task.cancel()
+                    if pending:
+                        loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+            except Exception:
+                pass
+            try:
+                if loop and not loop.is_closed():
+                    loop.close()
+            except Exception:
+                pass
+
+    thread = threading.Thread(target=run_async, daemon=True)
+    thread.start()
+
+    def cleanup() -> None:
+        """Clean up the keyboard controller and event loop."""
+        quit_event.set()  # Signal to stop
+        # Give the thread a moment to clean up naturally
+        if thread:
+            thread.join(timeout=1.0)
+
+    return quit_event, cleanup
+
+
+def test_stereo_camera(ip: str, resolution_name: str = "1200", fps: int = 30) -> None:
     """Test stereo camera (left and right mono cameras)."""
     print(f"\n{'=' * 60}")
     print(f"Testing STEREO camera at {ip}")
@@ -94,12 +180,15 @@ def test_stereo_camera(ip: str, resolution_name: str = "720", fps: int = 30) -> 
 
         print("\nDisplaying stereo frames. Press 'q' to quit...\n")
 
+        # Set up quit listener
+        quit_event, cleanup_quit = setup_quit_listener()
+
         # FPS tracking
         left_frame_times: list[float] = []
         right_frame_times: list[float] = []
         frame_count = 0
 
-        while True:
+        while not quit_event.is_set():
             try:
                 # Get frames (blocking)
                 frames = camera.get_latest_frames()
@@ -122,9 +211,9 @@ def test_stereo_camera(ip: str, resolution_name: str = "720", fps: int = 30) -> 
                     left_fps = calculate_fps(left_frame_times)
                     right_fps = calculate_fps(right_frame_times)
 
-                    # Draw FPS on images
-                    left_img = draw_fps(left_frame.image, left_fps, "Left - ")
-                    right_img = draw_fps(right_frame.image, right_fps, "Right - ")
+                    # Draw FPS and timestamp on images
+                    left_img = draw_fps_and_timestamp(left_frame.image, left_fps, left_frame.timestamp, "Left - ")
+                    right_img = draw_fps_and_timestamp(right_frame.image, right_fps, right_frame.timestamp, "Right - ")
 
                     # Display frames
                     cv2.imshow(f"Left Camera - {ip}", left_img)
@@ -134,14 +223,18 @@ def test_stereo_camera(ip: str, resolution_name: str = "720", fps: int = 30) -> 
                     if frame_count % 30 == 0:
                         print(f"Frames: {frame_count} | Left FPS: {left_fps:.1f} | Right FPS: {right_fps:.1f}")
 
-                # Check for quit
-                if cv2.waitKey(1) & 0xFF == ord("q"):
+                # Process OpenCV window events (non-blocking)
+                cv2.waitKey(1)
+
+                # Check for quit from command line
+                if quit_event.is_set():
                     break
 
             except KeyboardInterrupt:
                 break
 
         # Cleanup
+        cleanup_quit()
         camera.stop()
         cv2.destroyAllWindows()
         print(f"\n✓ Test completed. Total frames: {frame_count}")
@@ -153,7 +246,7 @@ def test_stereo_camera(ip: str, resolution_name: str = "720", fps: int = 30) -> 
         raise
 
 
-def test_mono_camera(ip: str, resolution_name: str = "720", fps: int = 30) -> None:
+def test_mono_camera(ip: str, resolution_name: str = "1200", fps: int = 30) -> None:
     """Test mono/RGB camera."""
     print(f"\n{'=' * 60}")
     print(f"Testing MONO/RGB camera at {ip}")
@@ -198,11 +291,14 @@ def test_mono_camera(ip: str, resolution_name: str = "720", fps: int = 30) -> No
 
         print("\nDisplaying RGB frames. Press 'q' to quit...\n")
 
+        # Set up quit listener
+        quit_event, cleanup_quit = setup_quit_listener()
+
         # FPS tracking
         frame_times: list[float] = []
         frame_count = 0
 
-        while True:
+        while not quit_event.is_set():
             try:
                 # Get frames (blocking)
                 frames = camera.get_latest_frames()
@@ -221,8 +317,8 @@ def test_mono_camera(ip: str, resolution_name: str = "720", fps: int = 30) -> No
                     # Calculate FPS
                     current_fps = calculate_fps(frame_times)
 
-                    # Draw FPS on image
-                    rgb_img = draw_fps(rgb_frame.image, current_fps)
+                    # Draw FPS and timestamp on image
+                    rgb_img = draw_fps_and_timestamp(rgb_frame.image, current_fps, rgb_frame.timestamp)
 
                     # Display frame
                     cv2.imshow(f"RGB Camera - {ip}", rgb_img)
@@ -231,14 +327,18 @@ def test_mono_camera(ip: str, resolution_name: str = "720", fps: int = 30) -> No
                     if frame_count % 30 == 0:
                         print(f"Frames: {frame_count} | FPS: {current_fps:.1f}")
 
-                # Check for quit
-                if cv2.waitKey(1) & 0xFF == ord("q"):
+                # Process OpenCV window events (non-blocking)
+                cv2.waitKey(1)
+
+                # Check for quit from command line
+                if quit_event.is_set():
                     break
 
             except KeyboardInterrupt:
                 break
 
         # Cleanup
+        cleanup_quit()
         camera.stop()
         cv2.destroyAllWindows()
         print(f"\n✓ Test completed. Total frames: {frame_count}")
@@ -280,9 +380,13 @@ def _process_frames(
         left_fps = calculate_fps(frame_times[left_key])
         right_fps = calculate_fps(frame_times[right_key])
 
-        # Draw FPS and add to display
-        display_images[left_key] = draw_fps(left_frame.image, left_fps, f"{ip} L - ")
-        display_images[right_key] = draw_fps(right_frame.image, right_fps, f"{ip} R - ")
+        # Draw FPS and timestamp, then add to display
+        display_images[left_key] = draw_fps_and_timestamp(
+            left_frame.image, left_fps, left_frame.timestamp, f"{ip} L - "
+        )
+        display_images[right_key] = draw_fps_and_timestamp(
+            right_frame.image, right_fps, right_frame.timestamp, f"{ip} R - "
+        )
 
     elif mode == "mono" and len(frames) == 1:
         rgb_frame = frames[0]
@@ -295,11 +399,11 @@ def _process_frames(
         # Calculate FPS
         current_fps = calculate_fps(frame_times[ip])
 
-        # Draw FPS and add to display
-        display_images[ip] = draw_fps(rgb_frame.image, current_fps, f"{ip} - ")
+        # Draw FPS and timestamp, then add to display
+        display_images[ip] = draw_fps_and_timestamp(rgb_frame.image, current_fps, rgb_frame.timestamp, f"{ip} - ")
 
 
-def test_multiple_cameras(ips: list[str], mode: str, resolution_name: str = "720", fps: int = 30) -> None:
+def test_multiple_cameras(ips: list[str], mode: str, resolution_name: str = "1200", fps: int = 30) -> None:
     """Test multiple cameras simultaneously using master-slave synchronization."""
     print(f"\n{'=' * 60}")
     print(f"Testing {len(ips)} camera(s) in {mode.upper()} mode")
@@ -363,13 +467,16 @@ def test_multiple_cameras(ips: list[str], mode: str, resolution_name: str = "720
 
         print(f"\nDisplaying frames from {len(cameras)} camera(s). Press 'q' to quit...\n")
 
+        # Set up quit listener
+        quit_event, cleanup_quit = setup_quit_listener()
+
         # Identify the "Master" camera (the first one) to pace the loop
         master_cam = cameras[0]
         slave_cams = cameras[1:]
 
         frame_count = 0
 
-        while True:
+        while not quit_event.is_set():
             try:
                 display_images: dict[str, cv2.Mat | np.ndarray] = {}
 
@@ -409,7 +516,11 @@ def test_multiple_cameras(ips: list[str], mode: str, resolution_name: str = "720
                             avg_fps = sum(fps_list) / len(fps_list)
                             print(f"Frames: {frame_count} | Avg FPS: {avg_fps:.1f}")
 
-                if cv2.waitKey(1) & 0xFF == ord("q"):
+                # Process OpenCV window events (non-blocking)
+                cv2.waitKey(1)
+
+                # Check for quit from command line
+                if quit_event.is_set():
                     break
 
             except KeyboardInterrupt:
@@ -426,6 +537,10 @@ def test_multiple_cameras(ips: list[str], mode: str, resolution_name: str = "720
 
         traceback.print_exc()
         # Cleanup on error
+        try:
+            cleanup_quit()
+        except Exception:
+            pass
         for camera in cameras:
             try:
                 camera.stop()
@@ -486,7 +601,7 @@ def interactive_test() -> None:
             print("Invalid choice. Enter 's' for stereo or 'm' for mono")
 
     # Select resolution
-    resolution = input("Resolution (default: 720): ").strip() or "720"
+    resolution = input("Resolution (default: 1200): ").strip() or "1200"
 
     # Select FPS
     while True:
