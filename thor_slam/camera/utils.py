@@ -9,14 +9,14 @@ from thor_slam.camera.types import IPv4
 logger = logging.getLogger(__name__)
 
 
-def get_devices_info() -> list[dai.DeviceInfo]:
+def get_luxonis_devices_info() -> list[dai.DeviceInfo]:
     """Get all devices on the network."""
     return dai.Device.getAllAvailableDevices()
 
 
-def get_device(ip: IPv4) -> dai.Device | None:
+def get_luxonis_device(ip: IPv4) -> dai.Device | None:
     """Get a device by its IP address."""
-    device_info = get_devices_info()
+    device_info = get_luxonis_devices_info()
     for info in device_info:
         if info.name == ip.ip:
             return dai.Device(info)

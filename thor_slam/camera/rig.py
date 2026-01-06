@@ -2,15 +2,15 @@
 
 import numpy as np
 
-from thor_slam.camera.interface import CameraInterface
+from thor_slam.camera.types import CameraSource
 
 
 class CameraRig:
     """Coordinating system for multiple cameras."""
 
-    cameras: list[CameraInterface]
+    cameras: list[CameraSource]
 
-    def __init__(self, cameras: list[CameraInterface]) -> None:
+    def __init__(self, cameras: list[CameraSource]) -> None:
         """Initialize the camera rig."""
         self.cameras = cameras
 
