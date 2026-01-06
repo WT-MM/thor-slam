@@ -92,7 +92,7 @@ class LuxonisCameraSource(CameraSource):
         self._pipeline = None
 
         # Load calibration data
-        self._calib_data = self.device.readCalibration()  # type: ignore[attr-defined]
+        self._calib_data = self.device.readCalibration()
 
         # Initialize intrinsics and extrinsics
         self._intrinsics: list[Intrinsics] | None = None
