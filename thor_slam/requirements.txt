@@ -1,2 +1,5 @@
 # requirements.txt
 
+depthai
+opencv-python
+colorlogging
