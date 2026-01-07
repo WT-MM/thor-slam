@@ -16,6 +16,7 @@ __pycache__/
 
 # Development
 scratch/
+system_calibration_dump.json
 
 # Build artifacts
 build/
