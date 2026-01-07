@@ -1,57 +1,13 @@
 """Coordinating system for multiple cameras with frame synchronization."""
 
+import logging
 from collections import deque
 from dataclasses import dataclass
 from threading import Lock
-from typing import Self
 
-from thor_slam.camera.types import CameraFrame, CameraSource, Extrinsics, Intrinsics
+from thor_slam.camera.types import CameraSource, Extrinsics, FrameSet, Intrinsics, SynchronizedFrameSet
 
-
-@dataclass
-class FrameSet:
-    """A set of frames from a single camera source at one point in time.
-
-    For stereo cameras, contains [left_frame, right_frame].
-    For mono cameras, contains [rgb_frame].
-    """
-
-    timestamp: float  # Reference timestamp (typically from the first frame)
-    frames: list[CameraFrame]
-    source_name: str
-
-    @classmethod
-    def from_frames(cls, frames: list[CameraFrame], source_name: str) -> Self:
-        """Create a FrameSet from a list of frames."""
-        if not frames:
-            raise ValueError("Cannot create FrameSet from empty frame list")
-        # Use the timestamp of the first frame as reference
-        return cls(timestamp=frames[0].timestamp, frames=frames, source_name=source_name)
-
-
-@dataclass
-class SynchronizedFrameSet:
-    """A set of synchronized frames from multiple camera sources.
-
-    All frames in this set are synchronized to the same reference timestamp.
-    """
-
-    timestamp: float  # The reference timestamp (from the slowest camera)
-    frame_sets: dict[str, FrameSet]  # source_name -> FrameSet
-    max_time_delta: float  # Maximum time difference between any frame and reference
-
-    def get_all_frames(self) -> list[CameraFrame]:
-        """Get all frames from all sources as a flat list."""
-        all_frames = []
-        for frame_set in self.frame_sets.values():
-            all_frames.extend(frame_set.frames)
-        return all_frames
-
-    def get_frames_for_source(self, source_name: str) -> list[CameraFrame] | None:
-        """Get frames for a specific source."""
-        if source_name in self.frame_sets:
-            return self.frame_sets[source_name].frames
-        return None
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -204,8 +160,7 @@ class CameraRig:
         5. Returns the synchronized frame set
 
         Args:
-            max_wait_ms: Maximum time to wait for frames (not currently used,
-                         but reserved for future blocking implementation).
+            max_wait_ms: Maximum time to wait for frames (not currently used).
 
         Returns:
             SynchronizedFrameSet if synchronization is successful, None otherwise.
@@ -219,6 +174,7 @@ class CameraRig:
         # Get the reference timestamp (from the slowest camera)
         reference_timestamp = self._get_reference_timestamp()
         if reference_timestamp is None:
+            logger.warning("No reference timestamp found, not all cameras have frames yet")
             return None  # Not all cameras have frames yet
 
         # Find closest frame set for each camera
@@ -241,12 +197,31 @@ class CameraRig:
             max_time_delta=max_time_delta,
         )
 
-    def try_get_synchronized_frames(self) -> SynchronizedFrameSet | None:
-        """Try to get synchronized frames without waiting.
+    def get_latest_frames(self) -> dict[str, FrameSet] | None:
+        """Get the latest frames from all cameras without synchronization.
 
-        This is an alias for get_synchronized_frames() for API consistency.
+        This returns the most recent FrameSet from each camera's queue,
+        without any timestamp matching. Each FrameSet preserves the individual
+        frame timestamps.
+
+        Returns:
+            Dictionary mapping source_name -> latest FrameSet, or None if any camera has no frames.
         """
-        return self.get_synchronized_frames()
+        if not self._running:
+            return None
+
+        # Poll cameras for new frames first
+        self._poll_cameras()
+
+        result: dict[str, FrameSet] = {}
+        with self._lock:
+            for name, queue in self._frame_queues.items():
+                if not queue:
+                    logger.warning(f"Camera {name} has no frames yet")
+                    return None  # A camera has no frames yet
+                result[name] = queue[-1]  # Get the most recent frame set
+
+        return result
 
     def get_source_names(self) -> list[str]:
         """Get the names of all camera sources."""

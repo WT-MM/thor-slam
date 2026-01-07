@@ -120,3 +120,95 @@ class CameraSource(ABC):
     def get_extrinsics(self) -> list[Extrinsics]:
         """Get the extrinsics of the camera source."""
         pass
+
+
+@dataclass
+class FrameSet:
+    """A set of frames from a single camera source.
+
+    For stereo cameras, contains [left_frame, right_frame].
+    For mono cameras, contains [rgb_frame].
+
+    Each frame has its own timestamp (accessible via frames[i].timestamp).
+    The `timestamp` field is a reference timestamp (typically from the first frame).
+    """
+
+    timestamp: float  # Reference timestamp
+    frames: list[CameraFrame]
+    source_name: str
+
+    @classmethod
+    def from_frames(cls, frames: list[CameraFrame], source_name: str) -> Self:
+        """Create a FrameSet from a list of frames."""
+        if not frames:
+            raise ValueError("Cannot create FrameSet from empty frame list")
+        # Use the timestamp of the first frame as reference
+        return cls(timestamp=frames[0].timestamp, frames=frames, source_name=source_name)
+
+    def get_timestamps(self) -> list[float]:
+        """Get timestamps for all frames in this set."""
+        return [frame.timestamp for frame in self.frames]
+
+    def get_max_timestamp(self) -> float:
+        """Get the maximum (newest) timestamp in this set."""
+        return max(frame.timestamp for frame in self.frames)
+
+    def get_min_timestamp(self) -> float:
+        """Get the minimum (oldest) timestamp in this set."""
+        return min(frame.timestamp for frame in self.frames)
+
+    def get_timestamp_spread(self) -> float:
+        """Get the time difference between oldest and newest frames."""
+        timestamps = self.get_timestamps()
+        return max(timestamps) - min(timestamps)
+
+
+@dataclass
+class SynchronizedFrameSet:
+    """A set of synchronized frames from multiple camera sources.
+
+    All frames in this set are synchronized to the same reference timestamp.
+    Individual frame timestamps are preserved and accessible via the FrameSet objects.
+    """
+
+    timestamp: float  # The reference timestamp (from the slowest camera)
+    frame_sets: dict[str, FrameSet]  # source_name -> FrameSet
+    max_time_delta: float  # Maximum time difference between any frame and reference
+
+    def get_all_frames(self) -> list[CameraFrame]:
+        """Get all frames from all sources as a flat list."""
+        all_frames = []
+        for frame_set in self.frame_sets.values():
+            all_frames.extend(frame_set.frames)
+        return all_frames
+
+    def get_frames_for_source(self, source_name: str) -> list[CameraFrame] | None:
+        """Get frames for a specific source."""
+        if source_name in self.frame_sets:
+            return self.frame_sets[source_name].frames
+        return None
+
+    def get_all_timestamps(self) -> dict[str, list[float]]:
+        """Get timestamps for all frames, organized by source.
+
+        Returns:
+            Dictionary mapping source_name -> list of timestamps for each frame.
+        """
+        return {name: fs.get_timestamps() for name, fs in self.frame_sets.items()}
+
+    def get_timestamp_for_frame(self, source_name: str, frame_index: int) -> float | None:
+        """Get the timestamp for a specific frame.
+
+        Args:
+            source_name: Name of the camera source.
+            frame_index: Index of the frame (0=left/first, 1=right/second, etc.).
+
+        Returns:
+            The frame's timestamp, or None if not found.
+        """
+        if source_name not in self.frame_sets:
+            return None
+        frames = self.frame_sets[source_name].frames
+        if frame_index < 0 or frame_index >= len(frames):
+            return None
+        return frames[frame_index].timestamp
