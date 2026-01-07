@@ -2,8 +2,12 @@
 
 import logging
 from collections import deque
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from threading import Lock
+from types import TracebackType
+from typing import Self
+
+import numpy as np
 
 from thor_slam.camera.types import CameraSource, Extrinsics, FrameSet, Intrinsics, SynchronizedFrameSet
 
@@ -12,10 +16,56 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class RigCalibration:
-    """Calibration data for the entire camera rig."""
+    """Calibration data for the entire camera rig.
+
+    Attributes:
+        intrinsics: Per-source camera intrinsics (source_name -> [intrinsics per camera]).
+        extrinsics: Per-source camera extrinsics relative to that source's reference frame
+                    (source_name -> [extrinsics per camera]).
+        rig_extrinsics: Position/orientation of each source relative to the rig coordinate frame
+                        (source_name -> Extrinsics). Used to transform camera extrinsics to rig space.
+    """
 
     intrinsics: dict[str, list[Intrinsics]]  # source_name -> [intrinsics per camera]
     extrinsics: dict[str, list[Extrinsics]]  # source_name -> [extrinsics per camera]
+    rig_extrinsics: dict[str, Extrinsics] = field(default_factory=dict)  # source_name -> rig pose
+
+    def get_world_extrinsics(self, source_name: str) -> list[Extrinsics] | None:
+        """Get extrinsics transformed to rig/world coordinate frame.
+
+        Combines camera extrinsics with rig extrinsics:
+            world_T_camera = rig_T_source @ source_T_camera
+
+        The resulting matrix is a transformation from a point in the camera coordinate frame
+        to a point in the world coordinate frame.
+
+        Args:
+            source_name: Name of the camera source.
+
+        Returns:
+            List of extrinsics in rig coordinate frame, or None if source not found.
+        """
+        if source_name not in self.extrinsics:
+            return None
+
+        camera_extrinsics = self.extrinsics[source_name]
+
+        # If no rig extrinsics defined for this source, return camera extrinsics as-is
+        if source_name not in self.rig_extrinsics:
+            logger.warning("No rig extrinsics defined for source %s, returning camera extrinsics as-is", source_name)
+            return camera_extrinsics
+
+        rig_ext = self.rig_extrinsics[source_name]
+        rig_matrix = rig_ext.to_4x4_matrix()
+
+        # Transform each camera's extrinsics to world frame
+        world_extrinsics = []
+        for cam_ext in camera_extrinsics:
+            cam_matrix = cam_ext.to_4x4_matrix()
+            world_matrix = rig_matrix @ cam_matrix
+            world_extrinsics.append(Extrinsics.from_4x4_matrix(world_matrix))
+
+        return world_extrinsics
 
 
 class CameraRig:
@@ -32,25 +82,55 @@ class CameraRig:
     _frame_queues: dict[str, deque[FrameSet]]
     _lock: Lock
     _running: bool
-    _calibration: RigCalibration | None
+    _calibration: RigCalibration
 
     def __init__(
         self,
         sources: list[CameraSource],
         queue_size: int = 30,
+        rig_extrinsics: dict[str, Extrinsics] | None = None,
     ) -> None:
         """Initialize the camera rig.
 
         Args:
             sources: List of camera sources to synchronize.
             queue_size: Maximum number of frame sets to keep in each queue.
+            rig_extrinsics: Optional dict mapping source names to their pose in the rig frame.
+                            If not provided, identity transforms are used for all sources.
         """
         self.sources = {src.name: src for src in sources}
         self.queue_size = queue_size
         self._frame_queues = {name: deque(maxlen=queue_size) for name in self.sources}
         self._lock = Lock()
         self._running = False
-        self._calibration = None
+
+        # Build rig extrinsics (identity if not provided)
+        if not rig_extrinsics:
+            logger.warning("No rig extrinsics provided, using identity transformation for all sources")
+            rig_extrinsics = {name: Extrinsics.from_4x4_matrix(np.eye(4)) for name in self.sources}
+
+        # Build calibration
+        self._calibration = self._build_calibration(rig_extrinsics)
+
+    """
+    Supports context manager protocol for automatic cleanup:
+        with CameraRig(sources) as rig:
+            rig.get_synchronized_frames()
+    """
+
+    def __enter__(self) -> Self:
+        """Enter context manager, starting all camera sources."""
+        self.start()
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None:
+        """Exit context manager, stopping all camera sources."""
+        self.stop()
 
     def start(self) -> None:
         """Start all camera sources."""
@@ -60,9 +140,6 @@ class CameraRig:
         for source in self.sources.values():
             source.start()
         self._running = True
-
-        # Cache calibration data
-        self._calibration = self._load_calibration()
 
     def stop(self) -> None:
         """Stop all camera sources."""
@@ -82,8 +159,12 @@ class CameraRig:
         """Check if the rig is running."""
         return self._running
 
-    def _load_calibration(self) -> RigCalibration:
-        """Load calibration data from all sources."""
+    def _build_calibration(self, rig_extrinsics: dict[str, Extrinsics]) -> RigCalibration:
+        """Build calibration data from all sources.
+
+        Args:
+            rig_extrinsics: Dict mapping source names to their pose in the rig frame.
+        """
         intrinsics: dict[str, list[Intrinsics]] = {}
         extrinsics: dict[str, list[Extrinsics]] = {}
 
@@ -91,13 +172,56 @@ class CameraRig:
             intrinsics[name] = source.get_intrinsics()
             extrinsics[name] = source.get_extrinsics()
 
-        return RigCalibration(intrinsics=intrinsics, extrinsics=extrinsics)
+        return RigCalibration(
+            intrinsics=intrinsics,
+            extrinsics=extrinsics,
+            rig_extrinsics=rig_extrinsics,
+        )
 
-    def get_calibration(self) -> RigCalibration:
+    @property
+    def calibration(self) -> RigCalibration:
         """Get the rig calibration data."""
-        if self._calibration is None:
-            self._calibration = self._load_calibration()
         return self._calibration
+
+    def load_rig_extrinsics(self, rig_extrinsics: dict[str, Extrinsics]) -> None:
+        """Load rig extrinsics for multiple sources.
+
+        Args:
+            rig_extrinsics: Dict mapping source names to their pose in the rig frame.
+        """
+        for name in rig_extrinsics:
+            if name not in self.sources:
+                raise ValueError(f"Unknown source: {name}")
+
+        # Rebuild calibration with updated rig extrinsics
+        new_rig_extrinsics = self._calibration.rig_extrinsics.copy()
+        new_rig_extrinsics.update(rig_extrinsics)
+        self._calibration = self._build_calibration(new_rig_extrinsics)
+
+    def get_rig_extrinsics(self, source_name: str) -> Extrinsics | None:
+        """Get the rig extrinsics for a camera source.
+
+        Args:
+            source_name: Name of the camera source.
+
+        Returns:
+            The source's pose in the rig frame, or None if not set.
+        """
+        return self._calibration.rig_extrinsics.get(source_name)
+
+    def get_world_extrinsics(self, source_name: str) -> list[Extrinsics] | None:
+        """Get camera extrinsics transformed to rig/world coordinate frame.
+
+        Combines camera extrinsics with rig extrinsics:
+            world_T_camera = rig_T_source @ source_T_camera
+
+        Args:
+            source_name: Name of the camera source.
+
+        Returns:
+            List of extrinsics in rig coordinate frame, or None if source not found.
+        """
+        return self._calibration.get_world_extrinsics(source_name)
 
     def _poll_cameras(self) -> None:
         """Poll all cameras for new frames and add to queues."""
@@ -217,7 +341,7 @@ class CameraRig:
         with self._lock:
             for name, queue in self._frame_queues.items():
                 if not queue:
-                    logger.warning(f"Camera {name} has no frames yet")
+                    logger.warning("Camera %s has no frames yet", name)
                     return None  # A camera has no frames yet
                 result[name] = queue[-1]  # Get the most recent frame set
 

@@ -277,7 +277,7 @@ def test_camera_rig(
 
         # Get calibration
         print("\n--- Rig Calibration Data ---")
-        calibration = rig.get_calibration()
+        calibration = rig.calibration
         for source_name, intrinsics_list in calibration.intrinsics.items():
             print(f"\n{source_name}:")
             for i, intrinsics in enumerate(intrinsics_list):
