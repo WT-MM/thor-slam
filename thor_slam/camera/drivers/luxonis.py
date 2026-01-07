@@ -7,7 +7,7 @@ import depthai as dai
 import numpy as np
 
 from thor_slam.camera.types import CameraFrame, CameraSource, Extrinsics, Intrinsics, IPv4
-from thor_slam.camera.utils import get_luxonis_device
+from thor_slam.camera.utils import get_luxonis_camera_valid_resolutions, get_luxonis_device
 
 # Supported resolutions as (width, height) tuples
 SUPPORTED_RESOLUTIONS: dict[str, tuple[int, int]] = {
@@ -77,6 +77,7 @@ class LuxonisCameraSource(CameraSource):
     _pipeline: dai.Pipeline | None
     _output_queues: dict[str, dai.MessageQueue]
     _running: bool
+    _valid_resolutions: list[tuple[int, int]]
 
     def __init__(self, cfg: LuxonisCameraConfig) -> None:
         """Initialize the camera source."""
@@ -90,6 +91,21 @@ class LuxonisCameraSource(CameraSource):
         self._running = False
         self._output_queues = {}
         self._pipeline = None
+
+        sockets_to_check = (
+            [dai.CameraBoardSocket.CAM_B, dai.CameraBoardSocket.CAM_C]
+            if self.cfg.stereo
+            else [dai.CameraBoardSocket.CAM_A]
+        )
+        for socket in sockets_to_check:
+            self._valid_resolutions = get_luxonis_camera_valid_resolutions(self.device, socket)
+            if self.cfg.resolution.as_tuple() in self._valid_resolutions:
+                break
+        else:
+            raise ValueError(
+                f"Resolution {self.cfg.resolution.as_tuple()} not supported for device {self.ip}. "
+                f"Supported resolutions: {self._valid_resolutions} for socket {socket}"
+            )
 
         # Load calibration data
         self._calib_data = self.device.readCalibration()

@@ -132,11 +132,19 @@ def get_rectification_maps(camera: LuxonisCameraSource) -> tuple[np.ndarray, np.
 
         # Get intrinsic matrices
         left_k = np.array(
-            calib.getCameraIntrinsics(left_socket, left_intrinsics.width, left_intrinsics.height)
-        )  # noqa: N806
+            calib.getCameraIntrinsics(
+                left_socket,
+                left_intrinsics.width,
+                left_intrinsics.height,
+            )
+        )
         right_k = np.array(
-            calib.getCameraIntrinsics(right_socket, right_intrinsics.width, right_intrinsics.height)
-        )  # noqa: N806
+            calib.getCameraIntrinsics(
+                right_socket,
+                right_intrinsics.width,
+                right_intrinsics.height,
+            )
+        )
 
         # Get distortion coefficients
         left_d = np.array(calib.getDistortionCoefficients(left_socket))  # noqa: N806

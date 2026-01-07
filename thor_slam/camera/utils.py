@@ -26,3 +26,13 @@ def get_luxonis_device(ip: IPv4) -> dai.Device | None:
         ", ".join([info.name for info in device_info]),
     )
     return None
+
+
+def get_luxonis_camera_valid_resolutions(device: dai.Device, socket: dai.CameraBoardSocket) -> list[tuple[int, int]]:
+    """Get the valid resolutions for a camera."""
+    features = device.getConnectedCameraFeatures()
+    for feature in features:
+        if feature.socket == socket:
+            return [(config.width, config.height) for config in feature.configs]
+    logger.warning("No valid resolutions found for device %s with socket %s", device.getMxId(), socket)
+    return []
