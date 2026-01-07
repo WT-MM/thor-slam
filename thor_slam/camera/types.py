@@ -3,9 +3,11 @@
 import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Self
+from typing import Literal, Self
 
 import numpy as np
+
+CameraSensorType = Literal["COLOR", "MONO"]
 
 
 class IPv4(str):
@@ -98,7 +100,15 @@ class CameraSource(ABC):
 
     @abstractmethod
     def get_latest_frames(self) -> list[CameraFrame]:
-        """Get the latest frame from the camera source."""
+        """Get the latest frame from the camera source (blocking)."""
+        pass
+
+    @abstractmethod
+    def try_get_latest_frames(self) -> list[CameraFrame] | None:
+        """Try to get the latest frames without blocking.
+
+        Returns None if no frames are available.
+        """
         pass
 
     @abstractmethod

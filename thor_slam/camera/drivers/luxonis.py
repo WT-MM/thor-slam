@@ -6,8 +6,12 @@ from typing import Self
 import depthai as dai
 import numpy as np
 
-from thor_slam.camera.types import CameraFrame, CameraSource, Extrinsics, Intrinsics, IPv4
-from thor_slam.camera.utils import get_luxonis_camera_valid_resolutions, get_luxonis_device
+from thor_slam.camera.types import CameraFrame, CameraSensorType, CameraSource, Extrinsics, Intrinsics, IPv4
+from thor_slam.camera.utils import (
+    get_luxonis_camera_valid_modes,
+    get_luxonis_camera_valid_resolutions,
+    get_luxonis_device,
+)
 
 # Supported resolutions as (width, height) tuples
 SUPPORTED_RESOLUTIONS: dict[str, tuple[int, int]] = {
@@ -18,6 +22,16 @@ SUPPORTED_RESOLUTIONS: dict[str, tuple[int, int]] = {
     "1200": (1920, 1200),
     "4000x3000": (4000, 3000),
     "4224x3136": (4224, 3136),
+}
+
+camera_sensor_type_to_dai: dict[CameraSensorType, dai.CameraSensorType] = {
+    "COLOR": dai.CameraSensorType.COLOR,
+    "MONO": dai.CameraSensorType.MONO,
+}
+
+dai_to_camera_sensor_type: dict[dai.CameraSensorType, CameraSensorType] = {
+    dai.CameraSensorType.COLOR: "COLOR",
+    dai.CameraSensorType.MONO: "MONO",
 }
 
 
@@ -47,11 +61,10 @@ class LuxonisResolution:
             if key.lower() == name_lower:
                 return cls(width=dims[0], height=dims[1])
 
-        # Not found
         raise ValueError(f"Unknown resolution name: {name}. Supported names: {sorted(SUPPORTED_RESOLUTIONS.keys())}")
 
     def as_tuple(self) -> tuple[int, int]:
-        """Return resolution as (width, height) tuple for v3 API."""
+        """Return resolution as (width, height) tuple."""
         return (self.width, self.height)
 
 
@@ -65,6 +78,7 @@ class LuxonisCameraConfig:
     fps: int
     queue_size: int = 8  # Size of output queues
     queue_blocking: bool = False  # If True, blocks when queue is full
+    camera_mode: CameraSensorType = "MONO"
 
 
 class LuxonisCameraSource(CameraSource):
@@ -97,18 +111,51 @@ class LuxonisCameraSource(CameraSource):
             if self.cfg.stereo
             else [dai.CameraBoardSocket.CAM_A]
         )
+
+        valid_resolutions: list[tuple[int, int]] = []
+        valid_modes: list[dai.CameraSensorType] = []
+
+        resolution_valid = False
+        mode_valid = False
         for socket in sockets_to_check:
-            self._valid_resolutions = get_luxonis_camera_valid_resolutions(self.device, socket)
-            if self.cfg.resolution.as_tuple() in self._valid_resolutions:
+            valid_resolutions = get_luxonis_camera_valid_resolutions(self.device, socket)
+            valid_modes = get_luxonis_camera_valid_modes(self.device, socket)
+
+            if self.cfg.resolution.as_tuple() in valid_resolutions:
+                resolution_valid = True
+
+            if camera_sensor_type_to_dai[self.cfg.camera_mode] in valid_modes:
+                mode_valid = True
+
+            if resolution_valid and mode_valid:
                 break
         else:
-            raise ValueError(
-                f"Resolution {self.cfg.resolution.as_tuple()} not supported for device {self.ip}. "
-                f"Supported resolutions: {self._valid_resolutions} for socket {socket}"
-            )
+            errors = []
+            if not resolution_valid:
+                supported_resolutions = [f"{width}x{height}" for width, height in valid_resolutions]
+                errors.append(
+                    ValueError(
+                        f"Resolution {self.cfg.resolution.as_tuple()} not supported for device {self.ip}. "
+                        f"Supported resolutions: {', '.join(supported_resolutions)}"
+                        f"for socket {socket}"
+                    )
+                )
+            if not mode_valid:
+                errors.append(
+                    ValueError(
+                        f"Camera mode {self.cfg.camera_mode} not supported for device {self.ip}. "
+                        f"Supported modes: {', '.join([dai_to_camera_sensor_type[mode] for mode in valid_modes])} "
+                        f"for socket {socket}"
+                    )
+                )
+
+            raise ExceptionGroup("Invalid camera configuration", errors) from errors[0]
 
         # Load calibration data
         self._calib_data = self.device.readCalibration()
+
+        # Store camera mode (sensor type) for pipeline building
+        self._camera_mode = camera_sensor_type_to_dai[self.cfg.camera_mode]
 
         # Initialize intrinsics and extrinsics
         self._intrinsics: list[Intrinsics] | None = None
@@ -123,7 +170,7 @@ class LuxonisCameraSource(CameraSource):
         fps = float(self.cfg.fps)
 
         if self.cfg.stereo:
-            # Create stereo pair using v3 Camera node
+            # Create stereo pair
             left_camera = self._pipeline.create(dai.node.Camera)
             right_camera = self._pipeline.create(dai.node.Camera)
 
@@ -131,7 +178,10 @@ class LuxonisCameraSource(CameraSource):
             left_camera.build(boardSocket=dai.CameraBoardSocket.CAM_B, sensorResolution=resolution, sensorFps=fps)
             right_camera.build(boardSocket=dai.CameraBoardSocket.CAM_C, sensorResolution=resolution, sensorFps=fps)
 
-            # Request outputs and create queues (v3 API)
+            left_camera.setSensorType(self._camera_mode)
+            right_camera.setSensorType(self._camera_mode)
+
+            # Request outputs and create queues
             left_output = left_camera.requestOutput(size=resolution, fps=fps)
             right_output = right_camera.requestOutput(size=resolution, fps=fps)
 
@@ -142,11 +192,13 @@ class LuxonisCameraSource(CameraSource):
                 maxSize=self.cfg.queue_size, blocking=self.cfg.queue_blocking
             )
         else:
-            # Create RGB camera using v3 Camera node
+            # Create RGB camera
             rgb_camera = self._pipeline.create(dai.node.Camera)
 
-            # Build camera with socket, resolution, and fps (v3 API)
+            # Build camera with socket, resolution, and fps
             rgb_camera.build(boardSocket=dai.CameraBoardSocket.CAM_A, sensorResolution=resolution, sensorFps=fps)
+
+            rgb_camera.setSensorType(self._camera_mode)
 
             # Request output and create queue
             rgb_output = rgb_camera.requestOutput(size=resolution, fps=fps)
@@ -155,7 +207,7 @@ class LuxonisCameraSource(CameraSource):
                 maxSize=self.cfg.queue_size, blocking=self.cfg.queue_blocking
             )
 
-        # Start the pipeline (v3 API)
+        # Start the pipeline
         self._pipeline.start()
 
     def get_intrinsics(self) -> list[Intrinsics]:
@@ -251,7 +303,7 @@ class LuxonisCameraSource(CameraSource):
         if self._running:
             return
 
-        # Build and start the pipeline (v3 API)
+        # Build and start the pipeline
         self._build_and_start_pipeline()
         self._running = True
 
@@ -260,7 +312,7 @@ class LuxonisCameraSource(CameraSource):
         if not self._running:
             return
 
-        # Stop the pipeline (v3 API)
+        # Stop the pipeline
         if self._pipeline is not None:
             self._pipeline.stop()
             self._pipeline = None

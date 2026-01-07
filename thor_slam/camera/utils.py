@@ -28,6 +28,16 @@ def get_luxonis_device(ip: IPv4) -> dai.Device | None:
     return None
 
 
+def get_luxonis_camera_valid_modes(device: dai.Device, socket: dai.CameraBoardSocket) -> list[dai.CameraSensorType]:
+    """Get the valid modes for a camera."""
+    features = device.getConnectedCameraFeatures()
+    for feature in features:
+        if feature.socket == socket:
+            return [mode for mode in feature.supportedTypes]
+    logger.warning("No valid modes found for device %s with socket %s", device.getMxId(), socket)
+    return []
+
+
 def get_luxonis_camera_valid_resolutions(device: dai.Device, socket: dai.CameraBoardSocket) -> list[tuple[int, int]]:
     """Get the valid resolutions for a camera."""
     features = device.getConnectedCameraFeatures()
