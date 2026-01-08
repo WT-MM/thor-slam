@@ -29,3 +29,7 @@ Install the package:
 ```bash
 pip install -e .
 ```
+
+### Useful tips
+
+- Get a urdf from Onshape with [onshnap](https://github.com/WT-MM/onshnap)
