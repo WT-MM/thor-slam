@@ -51,7 +51,8 @@ def get_luxonis_camera_valid_resolutions(device: dai.Device, socket: dai.CameraB
     logger.warning("No valid resolutions found for device %s with socket %s", device.getMxId(), socket)
     return []
 
-
+# TODO: write tests to make sure this is correct.
+# e.g. make an onshape with something 1m in x, 0.5m in y, 0.25m in z and check the transform. Also check roll pitch yaw.
 def parse_urdf_transform(joint_elem: ET.Element) -> np.ndarray:
     """Parses a 4x4 transform matrix from a URDF fixed joint origin."""
     origin = joint_elem.find("origin")
@@ -85,8 +86,8 @@ def load_rig_extrinsics_from_urdf(urdf_path: str | Path, camera_map: dict[str, s
 
     Args:
         urdf_path: Path to the .urdf with star topology.
-        camera_map: A dictionary mapping Source Name to a substring of the URDF Link Name.
-                    Example: { "192.168.1.101": "oak-d-pro_bracket_1" }
+        camera_map: A dictionary mapping Source Name to the URDF Link Name.
+                    Example: { "192.168.1.101": "link_oak-d-pro_bracket_1" }
 
     Returns:
         Dictionary mapping Source Name -> Extrinsics object.
@@ -100,7 +101,7 @@ def load_rig_extrinsics_from_urdf(urdf_path: str | Path, camera_map: dict[str, s
 
     extrinsics_out: dict[str, Extrinsics] = {}
 
-    for source_name, link_substring in camera_map.items():
+    for source_name, link_name in camera_map.items():
         found = False
 
         for joint in root.findall("joint"):
@@ -110,7 +111,7 @@ def load_rig_extrinsics_from_urdf(urdf_path: str | Path, camera_map: dict[str, s
 
             child_link_name = child.get("link")
 
-            if link_substring == child_link_name:
+            if link_name == child_link_name:
                 # Verify parent is base_link (sanity check for star topology)
                 parent = joint.find("parent")
                 if parent is None or parent.get("link") != "base_link":
