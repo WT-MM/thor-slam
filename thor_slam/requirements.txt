@@ -4,3 +4,4 @@ depthai
 opencv-python
 colorlogging
 askin
+scipy

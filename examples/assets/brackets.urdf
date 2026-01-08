@@ -1,0 +1,307 @@
+<?xml version='1.0' encoding='utf-8'?>
+<robot name="onshnap">
+  <link name="base_link">
+    <inertial>
+      <mass value="0.001" />
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <inertia ixx="0.000001" ixy="0" ixz="0" iyy="0.000001" iyz="0" izz="0.000001" />
+    </inertial>
+  </link>
+  <link name="link_standoff1_1">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="meshes/standoff1_1.stl" />
+      </geometry>
+      <material name="link_standoff1_1_material">
+        <color rgba="0.647 0.647 0.647 1.000" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="meshes/standoff1_1.stl" />
+      </geometry>
+    </collision>
+    <inertial>
+      <mass value="0.000000" />
+      <origin xyz="0.000000 0.000000 0.000000" rpy="0 0 0" />
+      <inertia ixx="0.000001" ixy="0.000000" ixz="0.000000" iyy="0.000001" iyz="0.000000" izz="0.000001" />
+    </inertial>
+  </link>
+  <joint name="joint_standoff1_1" type="fixed">
+    <parent link="base_link" />
+    <child link="link_standoff1_1" />
+    <origin xyz="0.00119904 0.19600000 0.02085680" rpy="3.14159265 0.00000000 0.00000000" />
+  </joint>
+  <link name="link_Part_12_1">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="meshes/Part_12_1.stl" />
+      </geometry>
+      <material name="link_Part_12_1_material">
+        <color rgba="0.769 0.886 0.953 1.000" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="meshes/Part_12_1.stl" />
+      </geometry>
+    </collision>
+    <inertial>
+      <mass value="579.853035" />
+      <origin xyz="-0.000000 -0.118500 0.009244" rpy="0 0 0" />
+      <inertia ixx="0.045964" ixy="0.000000" ixz="0.000001" iyy="0.105270" iyz="0.000000" izz="0.089007" />
+    </inertial>
+  </link>
+  <joint name="joint_Part_12_1" type="fixed">
+    <parent link="base_link" />
+    <child link="link_Part_12_1" />
+    <origin xyz="0.00119904 -0.00000000 -0.00184320" rpy="0.00000000 0.00000000 0.00000000" />
+  </joint>
+  <link name="link_oak-d-pro_bracket_1">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="meshes/oak-d-pro_bracket_1.stl" />
+      </geometry>
+      <material name="link_oak-d-pro_bracket_1_material">
+        <color rgba="0.647 0.647 0.647 1.000" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="meshes/oak-d-pro_bracket_1.stl" />
+      </geometry>
+    </collision>
+    <inertial>
+      <mass value="0.000000" />
+      <origin xyz="0.000000 0.000000 0.000000" rpy="0 0 0" />
+      <inertia ixx="0.000001" ixy="0.000000" ixz="0.000000" iyy="0.000001" iyz="0.000000" izz="0.000001" />
+    </inertial>
+  </link>
+  <joint name="joint_oak-d-pro_bracket_1" type="fixed">
+    <parent link="base_link" />
+    <child link="link_oak-d-pro_bracket_1" />
+    <origin xyz="-0.13126833 0.06623666 -0.00184320" rpy="0.00000000 0.00000000 -2.74016693" />
+  </joint>
+  <link name="link_tower_first_tier_1">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="meshes/tower_first_tier_1.stl" />
+      </geometry>
+      <material name="link_tower_first_tier_1_material">
+        <color rgba="0.616 0.812 0.929 1.000" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="meshes/tower_first_tier_1.stl" />
+      </geometry>
+    </collision>
+    <inertial>
+      <mass value="0.000000" />
+      <origin xyz="0.000000 0.000000 0.000000" rpy="0 0 0" />
+      <inertia ixx="0.000001" ixy="0.000000" ixz="0.000000" iyy="0.000001" iyz="0.000000" izz="0.000001" />
+    </inertial>
+  </link>
+  <joint name="joint_tower_first_tier_1" type="fixed">
+    <parent link="base_link" />
+    <child link="link_tower_first_tier_1" />
+    <origin xyz="0.00119904 -0.00000000 -0.00184320" rpy="0.00000000 0.00000000 0.00000000" />
+  </joint>
+  <link name="link_standoff3_1">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="meshes/standoff3_1.stl" />
+      </geometry>
+      <material name="link_standoff3_1_material">
+        <color rgba="0.918 0.918 0.918 1.000" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="meshes/standoff3_1.stl" />
+      </geometry>
+    </collision>
+    <inertial>
+      <mass value="0.000000" />
+      <origin xyz="0.000000 0.000000 0.000000" rpy="0 0 0" />
+      <inertia ixx="0.000001" ixy="0.000000" ixz="0.000000" iyy="0.000001" iyz="0.000000" izz="0.000001" />
+    </inertial>
+  </link>
+  <joint name="joint_standoff3_1" type="fixed">
+    <parent link="base_link" />
+    <child link="link_standoff3_1" />
+    <origin xyz="0.00119904 0.19600000 0.02085680" rpy="3.14159265 0.00000000 0.00000000" />
+  </joint>
+  <link name="link_standoff2_1">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="meshes/standoff2_1.stl" />
+      </geometry>
+      <material name="link_standoff2_1_material">
+        <color rgba="0.231 0.380 0.706 1.000" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="meshes/standoff2_1.stl" />
+      </geometry>
+    </collision>
+    <inertial>
+      <mass value="0.000000" />
+      <origin xyz="0.000000 0.000000 0.000000" rpy="0 0 0" />
+      <inertia ixx="0.000001" ixy="0.000000" ixz="0.000000" iyy="0.000001" iyz="0.000000" izz="0.000001" />
+    </inertial>
+  </link>
+  <joint name="joint_standoff2_1" type="fixed">
+    <parent link="base_link" />
+    <child link="link_standoff2_1" />
+    <origin xyz="0.00119904 -0.12400000 0.02085680" rpy="3.14159265 0.00000000 0.00000000" />
+  </joint>
+  <link name="link_oak-d-pro_bracket_3">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="meshes/oak-d-pro_bracket_3.stl" />
+      </geometry>
+      <material name="link_oak-d-pro_bracket_3_material">
+        <color rgba="0.647 0.647 0.647 1.000" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="meshes/oak-d-pro_bracket_3.stl" />
+      </geometry>
+    </collision>
+    <inertial>
+      <mass value="0.000000" />
+      <origin xyz="0.000000 0.000000 0.000000" rpy="0 0 0" />
+      <inertia ixx="0.000001" ixy="0.000000" ixz="0.000000" iyy="0.000001" iyz="0.000000" izz="0.000001" />
+    </inertial>
+  </link>
+  <joint name="joint_oak-d-pro_bracket_3" type="fixed">
+    <parent link="base_link" />
+    <child link="link_oak-d-pro_bracket_3" />
+    <origin xyz="-0.05630096 -0.05700000 -0.00184320" rpy="0.00000000 0.00000000 -1.57079633" />
+  </joint>
+  <link name="link_oak-d-pro_bracket_2">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="meshes/oak-d-pro_bracket_2.stl" />
+      </geometry>
+      <material name="link_oak-d-pro_bracket_2_material">
+        <color rgba="0.647 0.647 0.647 1.000" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="meshes/oak-d-pro_bracket_2.stl" />
+      </geometry>
+    </collision>
+    <inertial>
+      <mass value="0.000000" />
+      <origin xyz="0.000000 0.000000 0.000000" rpy="0 0 0" />
+      <inertia ixx="0.000001" ixy="0.000000" ixz="0.000000" iyy="0.000001" iyz="0.000000" izz="0.000001" />
+    </inertial>
+  </link>
+  <joint name="joint_oak-d-pro_bracket_2" type="fixed">
+    <parent link="base_link" />
+    <child link="link_oak-d-pro_bracket_2" />
+    <origin xyz="0.08873233 -0.03962140 -0.00184320" rpy="0.00000000 0.00000000 -0.40142573" />
+  </joint>
+  <link name="link_back_high_bracket_1">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="meshes/back_high_bracket_1.stl" />
+      </geometry>
+      <material name="link_back_high_bracket_1_material">
+        <color rgba="0.918 0.918 0.918 1.000" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="meshes/back_high_bracket_1.stl" />
+      </geometry>
+    </collision>
+    <inertial>
+      <mass value="0.000000" />
+      <origin xyz="0.000000 0.000000 0.000000" rpy="0 0 0" />
+      <inertia ixx="0.000001" ixy="0.000000" ixz="0.000000" iyy="0.000001" iyz="0.000000" izz="0.000001" />
+    </inertial>
+  </link>
+  <joint name="joint_back_high_bracket_1" type="fixed">
+    <parent link="base_link" />
+    <child link="link_back_high_bracket_1" />
+    <origin xyz="0.00119904 -0.00000000 -0.00184320" rpy="0.00000000 0.00000000 0.00000000" />
+  </joint>
+  <link name="link_tower_second_tier_1">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="meshes/tower_second_tier_1.stl" />
+      </geometry>
+      <material name="link_tower_second_tier_1_material">
+        <color rgba="0.973 0.529 0.004 1.000" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="meshes/tower_second_tier_1.stl" />
+      </geometry>
+    </collision>
+    <inertial>
+      <mass value="0.000000" />
+      <origin xyz="0.000000 0.000000 0.000000" rpy="0 0 0" />
+      <inertia ixx="0.000001" ixy="0.000000" ixz="0.000000" iyy="0.000001" iyz="0.000000" izz="0.000001" />
+    </inertial>
+  </link>
+  <joint name="joint_tower_second_tier_1" type="fixed">
+    <parent link="base_link" />
+    <child link="link_tower_second_tier_1" />
+    <origin xyz="0.00119904 -0.00000000 -0.00184320" rpy="0.00000000 0.00000000 0.00000000" />
+  </joint>
+  <link name="link_standoff4_1">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="meshes/standoff4_1.stl" />
+      </geometry>
+      <material name="link_standoff4_1_material">
+        <color rgba="0.769 0.886 0.953 1.000" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="meshes/standoff4_1.stl" />
+      </geometry>
+    </collision>
+    <inertial>
+      <mass value="0.000000" />
+      <origin xyz="0.000000 0.000000 0.000000" rpy="0 0 0" />
+      <inertia ixx="0.000001" ixy="0.000000" ixz="0.000000" iyy="0.000001" iyz="0.000000" izz="0.000001" />
+    </inertial>
+  </link>
+  <joint name="joint_standoff4_1" type="fixed">
+    <parent link="base_link" />
+    <child link="link_standoff4_1" />
+    <origin xyz="0.00119904 -0.12400000 0.02085680" rpy="3.14159265 0.00000000 0.00000000" />
+  </joint>
+</robot>
