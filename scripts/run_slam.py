@@ -131,7 +131,7 @@ def run(camera_ips: list[str], num_cameras: int, fps: int, display: bool) -> Non
         print("Detecting cameras...")
         cameras = detect_cameras(camera_ips)
 
-        time.sleep(3.0)
+        time.sleep(5.0)
 
         # Create sources
         print("\nCreating camera sources...")
