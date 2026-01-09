@@ -41,3 +41,20 @@ isaac_ros_visual_slam
 --share)/rviz
 /default.cfg.rviz
 ```
+
+
+### Setting up isaac ros visual slam
+
+[cuvslam repo](https://github.com/NVIDIA-ISAAC-ROS/isaac_ros_visual_slam)
+
+follow the isaac ros getting started [guide](https://nvidia-isaac-ros.github.io/getting_started/index.html)
+
+then follow the vslam specific [guide](https://nvidia-isaac-ros.github.io/repositories_and_packages/isaac_ros_visual_slam/isaac_ros_visual_slam/index.html#quickstart)
+
+then run `isaac-ros activate` to enter the isaac ros environment 
+
+and run `make isaac-ros-launch` to launch the isaac ros visual slam node
+
+then run `make slam-run` to start the camera bridge
+
+you can run `make rviz` to launch the rviz2 visualizer
