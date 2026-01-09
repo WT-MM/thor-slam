@@ -50,15 +50,23 @@ isaac-ros-launch:
 	@echo "Expected topics:"
 	@for i in $$(seq 0 $$(($(NUM_CAMERAS) - 1))); do echo "  /visual_slam/image_$$i"; done
 	@echo ""
-	ros2 launch isaac_ros_visual_slam isaac_ros_visual_slam.launch.py \
+	ros2 launch ./launch/thor_visual_slam.launch.py \
 		num_cameras:=$(NUM_CAMERAS) \
 		enable_slam_visualization:=true \
 		rectified_images:=true \
 		enable_landmarks_view:=true \
 		enable_observations_view:=true \
 		enable_localization_n_mapping:=true \
-		verbosity:=1 \
-		enable_debug_mode:=true
+		enable_imu_fusion:=false \
+	# ros2 launch isaac_ros_visual_slam isaac_ros_visual_slam.launch.py \
+	# 	num_cameras:=$(NUM_CAMERAS) \
+	# 	enable_slam_visualization:=true \
+	# 	rectified_images:=false \
+	# 	enable_landmarks_view:=true \
+	# 	enable_observations_view:=true \
+	# 	enable_localization_n_mapping:=true \
+	# 	verbosity:=1 \
+	# 	enable_debug_mode:=true
 
 # ============================================ #
 #              Thor SLAM Bridge                #
