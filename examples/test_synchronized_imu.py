@@ -345,6 +345,7 @@ def test_synchronized_imu(
 
                 # Calculate timestamp delta between frame and IMU
                 timestamp_delta = abs(sync_frames.sensor_timestamp - sync_frames.timestamp)
+                breakpoint()
                 imu_timestamp_deltas.append(timestamp_delta)
 
                 # Get IMU data (should be IMUData object directly)
@@ -402,11 +403,11 @@ def test_synchronized_imu(
         if imu_timestamp_deltas:
             imu_timestamp_deltas = np.array(imu_timestamp_deltas)
             print("\nTimestamp Synchronization Statistics:")
-            print(f"  Mean delta: {np.mean(imu_timestamp_deltas):.2f} ms")
-            print(f"  Std dev:   {np.std(imu_timestamp_deltas):.2f} ms")
-            print(f"  Min delta: {np.min(imu_timestamp_deltas):.2f} ms")
-            print(f"  Max delta: {np.max(imu_timestamp_deltas):.2f} ms")
-            print(f"  Median:    {np.median(imu_timestamp_deltas):.2f} ms")
+            print(f"  Mean delta: {np.mean(imu_timestamp_deltas * 1000):.2f} ms")
+            print(f"  Std dev:   {np.std(imu_timestamp_deltas)*1000:.2f} ms")
+            print(f"  Min delta: {np.min(imu_timestamp_deltas)*1000:.2f} ms")
+            print(f"  Max delta: {np.max(imu_timestamp_deltas)*1000:.2f} ms")
+            print(f"  Median:    {np.median(imu_timestamp_deltas)*1000:.2f} ms")
 
         if frame_timestamps and imu_timestamps:
             elapsed = time.time() - start_time

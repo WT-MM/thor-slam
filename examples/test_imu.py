@@ -137,19 +137,19 @@ class IMUPlotter:
 
         self.start_time = None
 
-    def add_data(self, imu_data: IMUData) -> None:
+    def add_data(self, imu_data: IMUData, timestamp: float) -> None:
         """Add IMU data point to the plotter."""
         if self.start_time is None:
-            self.start_time = imu_data.timestamp
+            self.start_time = timestamp
 
-        relative_time = imu_data.timestamp - self.start_time
+        relative_time = timestamp - self.start_time
         self.times.append(relative_time)
-        self.accel_x.append(imu_data.accelerometer[0])
-        self.accel_y.append(imu_data.accelerometer[1])
-        self.accel_z.append(imu_data.accelerometer[2])
-        self.gyro_x.append(imu_data.gyroscope[0])
-        self.gyro_y.append(imu_data.gyroscope[1])
-        self.gyro_z.append(imu_data.gyroscope[2])
+        self.accel_x.append(imu_data['accelerometer'][0])
+        self.accel_y.append(imu_data['accelerometer'][1])
+        self.accel_z.append(imu_data['accelerometer'][2])
+        self.gyro_x.append(imu_data['gyroscope'][0])
+        self.gyro_y.append(imu_data['gyroscope'][1])
+        self.gyro_z.append(imu_data['gyroscope'][2])
 
     def update_plot(self, frame) -> tuple:
         """Update the plot with latest data."""
@@ -284,31 +284,18 @@ def run_with_plotting(
     try:
         while plt.get_fignums():  # Continue while plot window is open
             # Get IMU data (non-blocking)
-            sensor_data = camera.try_get_sensor_data()
+            sensor_data, timestamp = camera.try_get_timestamped_sensor_data()
 
             if sensor_data is None:
                 plt.pause(0.001)  # Small pause to allow plot updates
                 continue
 
-            imu_data = sensor_data.get("imu")
-            imu_packets = sensor_data.get("imu_packets")
-
+            imu_data = sensor_data
             if imu_data is not None:
-                # Add to plotter
-                plotter.add_data(imu_data)
-
-                # Update statistics
-                timestamps.append(imu_data.timestamp)
-                total_imu_readings += 1
-
-            if imu_packets is not None:
-                # Process batch of IMU packets
-                for packet in imu_packets:
-                    plotter.add_data(packet)
-                    timestamps.append(packet.timestamp)
-                    total_imu_readings += 1
-
+                plotter.add_data(imu_data, timestamp)
                 packet_count += 1
+
+            print(f"Timestamp: {timestamp}")
 
             # Update plot
             plotter.update_plot(None)

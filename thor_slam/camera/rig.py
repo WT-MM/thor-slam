@@ -29,6 +29,7 @@ class RigCalibration:
     intrinsics: dict[str, list[Intrinsics]]  # source_name -> [intrinsics per camera]
     extrinsics: dict[str, list[Extrinsics]]  # source_name -> [extrinsics per camera]
     rig_extrinsics: dict[str, Extrinsics] = field(default_factory=dict)  # source_name -> rig pose
+    imu_extrinsics: Extrinsics | None = None  # imu pose relative to the camera it's attached to
 
     def get_world_extrinsics(self, source_name: str) -> list[Extrinsics] | None:
         """Get extrinsics transformed to rig/world coordinate frame.

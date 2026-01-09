@@ -58,3 +58,21 @@ and run `make isaac-ros-launch` to launch the isaac ros visual slam node
 then run `make slam-run` to start the camera bridge
 
 you can run `make rviz` to launch the rviz2 visualizer
+
+### Luxonis coordinate convention
+
+Luxonis cameras use the following coordinate convention:
+
+- X: Up
+- Y: Right
+- Z: Forward (direction of camera outwards)
+
+isaac ros uses:
+ +x = forward
+ +y = left
+ +z = up # check this
+
+ Camera optical frames (for cuVSLAM) need to be
+ +z forward (out through lens)
+ +y down
+ +x right
