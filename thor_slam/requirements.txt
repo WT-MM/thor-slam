@@ -5,3 +5,4 @@ opencv-python
 colorlogging
 askin
 scipy
+matplotlib

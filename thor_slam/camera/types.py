@@ -79,6 +79,43 @@ class CameraFrame:
     camera_name: str
 
 
+class SensorData(ABC):
+    """Abstract base class for sensor data."""
+
+    @abstractmethod
+    def get_timestamp(self) -> float:
+        """Get the timestamp of the sensor data."""
+        pass
+
+    @abstractmethod
+    def get_sequence_num(self) -> int:
+        """Get the sequence number of the sensor data."""
+        pass
+
+    @abstractmethod
+    def get_data(self) -> dict:
+        """Get the data of the sensor data."""
+        pass
+
+
+class IMUData(SensorData):
+    """IMU sensor data."""
+
+    accelerometer: np.ndarray
+    gyroscope: np.ndarray
+    timestamp: float
+    sequence_num: int
+
+    def get_timestamp(self) -> float:
+        return self.timestamp
+
+    def get_sequence_num(self) -> int:
+        return self.sequence_num
+
+    def get_data(self) -> dict:
+        return {"accelerometer": self.accelerometer, "gyroscope": self.gyroscope}
+
+
 class CameraSource(ABC):
     """Abstract base class for camera sources."""
 
@@ -122,12 +159,28 @@ class CameraSource(ABC):
         pass
 
     @abstractmethod
-    def get_sensor_data(self) -> dict:
+    def get_timestamped_sensor_data(self) -> tuple[dict | None, float | None]:
         """Get the (optional) sensor data of the camera source. E.g. imu data."""
         pass
 
-    @abstractmethod
+    def try_get_timestamped_sensor_data(self) -> tuple[dict | None, float | None]:
+        """Try to get sensor data without blocking.
+
+        Default implementation calls get_timestamped_sensor_data(). Override in subclasses
+        for non-blocking behavior.
+
+        Returns:
+            Tuple of (sensor data if available, timestamp if available), or (None, None) if no data available.
+        """
+        if not self.has_sensor_data:
+            return None, None
+        try:
+            return self.get_timestamped_sensor_data()
+        except Exception:
+            return None, None
+
     @property
+    @abstractmethod
     def has_sensor_data(self) -> bool:
         """Check if the camera source has sensor data."""
         pass
@@ -149,6 +202,7 @@ class FrameSet:
     frames: list[CameraFrame]
     source_name: str
     sensor_data: dict | None = None
+    sensor_timestamp: float | None = None
 
     @classmethod
     def from_frames(cls, frames: list[CameraFrame], source_name: str) -> Self:
@@ -188,6 +242,7 @@ class SynchronizedFrameSet:
     frame_sets: dict[str, FrameSet]  # source_name -> FrameSet
     max_time_delta: float  # Maximum time difference between any frame and reference
     sensor_data: dict | None = None
+    sensor_timestamp: float | None = None
 
     def get_all_frames(self) -> list[CameraFrame]:
         """Get all frames from all sources as a flat list."""

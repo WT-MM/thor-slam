@@ -83,12 +83,15 @@ class CameraRig:
     _lock: Lock
     _running: bool
     _calibration: RigCalibration
+    _imu_source: str | None
+    _imu_queue: deque[tuple[float, dict]]
 
     def __init__(
         self,
         sources: list[CameraSource],
         queue_size: int = 30,
         rig_extrinsics: dict[str, Extrinsics] | None = None,
+        imu_source: str | None = None,
     ) -> None:
         """Initialize the camera rig.
 
@@ -97,12 +100,31 @@ class CameraRig:
             queue_size: Maximum number of frame sets to keep in each queue.
             rig_extrinsics: Optional dict mapping source names to their pose in the rig frame.
                             If not provided, identity transforms are used for all sources.
+            imu_source: Optional name of the camera source to use as the primary IMU.
+                        If specified, IMU data will be pulled from this source.
         """
         self.sources = {src.name: src for src in sources}
         self.queue_size = queue_size
         self._frame_queues = {name: deque(maxlen=queue_size) for name in self.sources}
         self._lock = Lock()
         self._running = False
+        self._imu_source = imu_source
+        self._imu_queue: deque[tuple[float, dict]] = deque(maxlen=queue_size)
+
+        # Validate IMU source if specified
+        if self._imu_source is not None:
+            if self._imu_source not in self.sources:
+                raise ValueError(
+                    f"IMU source '{self._imu_source}' not found in sources. "
+                    f"Available sources: {list(self.sources.keys())}"
+                )
+            imu_source_obj = self.sources[self._imu_source]
+            if not imu_source_obj.has_sensor_data:
+                raise ValueError(
+                    f"IMU source '{self._imu_source}' does not have sensor data enabled. "
+                    "Set read_imu=True when creating the camera source."
+                )
+            logger.info("Using '%s' as IMU source", self._imu_source)
 
         # Build rig extrinsics (identity if not provided)
         if not rig_extrinsics:
@@ -226,9 +248,21 @@ class CameraRig:
     def _poll_cameras(self) -> None:
         """Poll all cameras for new frames and add to queues."""
         for name, source in self.sources.items():
+            if name == self._imu_source:
+                sensor_data = source.try_get_timestamped_sensor_data()
+                if sensor_data is not None and sensor_data[0] is not None and sensor_data[1] is not None:
+                    self._imu_queue.append((sensor_data[1], sensor_data[0]))
+
             frames = source.try_get_latest_frames()
             if frames:
                 frame_set = FrameSet.from_frames(frames, source_name=name)
+                # if source.has_sensor_data:
+                #     # Try to get sensor data (non-blocking)
+                #     sensor_data = source.try_get_sensor_data()
+                #     if sensor_data:
+                #         frame_set.sensor_data = sensor_data.get("imu")
+                #         frame_set.sensor_timestamp = frame_set.sensor_data.timestamp
+
                 with self._lock:
                     self._frame_queues[name].append(frame_set)
 
@@ -250,6 +284,24 @@ class CameraRig:
             return None
 
         return min(queue, key=lambda fs: abs(fs.timestamp - target_timestamp))
+
+    def _find_closest_imu_data(
+        self, queue: deque[tuple[float, dict]], target_timestamp: float
+    ) -> tuple[float | None, dict | None]:
+        """Find the IMU data closest to the target timestamp from a queue.
+
+        Args:
+            queue: The queue to search (contains tuples of (timestamp, IMUData)).
+            target_timestamp: The target timestamp to match.
+
+        Returns:
+            Tuple of (IMUData object closest to target, timestamp), or (None, None) if no IMU data available.
+        """
+        if not queue:
+            return None, None
+
+        closest = min(queue, key=lambda data: abs(data[0] - target_timestamp))
+        return closest[0], closest[1]
 
     def _get_reference_timestamp(self) -> float | None:
         """Get the reference timestamp (from the slowest camera).
@@ -281,7 +333,8 @@ class CameraRig:
         2. Finds the camera that's furthest behind (slowest)
         3. Uses that camera's timestamp as the reference
         4. For each camera, finds the frame set closest to the reference timestamp
-        5. Returns the synchronized frame set
+        5. Aggregates IMU data from all sources, finding the closest IMU reading to the reference timestamp
+        6. Returns the synchronized frame set
 
         Args:
             max_wait_ms: Maximum time to wait for frames (not currently used).
@@ -304,7 +357,6 @@ class CameraRig:
         # Find closest frame set for each camera
         synchronized_frame_sets: dict[str, FrameSet] = {}
         max_time_delta = 0.0
-
         with self._lock:
             for name, queue in self._frame_queues.items():
                 closest = self._find_closest_frame_set(queue, reference_timestamp)
@@ -315,10 +367,21 @@ class CameraRig:
                 time_delta = abs(closest.timestamp - reference_timestamp)
                 max_time_delta = max(max_time_delta, time_delta)
 
+        sensor_data: dict | None = None
+        sensor_timestamp: float | None = None
+
+        if self._imu_source is not None:
+            imu_timestamp, closest_imu_data = self._find_closest_imu_data(self._imu_queue, reference_timestamp)
+            if closest_imu_data is not None:
+                sensor_data = closest_imu_data
+                sensor_timestamp = imu_timestamp
+
         return SynchronizedFrameSet(
             timestamp=reference_timestamp,
             frame_sets=synchronized_frame_sets,
             max_time_delta=max_time_delta,
+            sensor_data=sensor_data,
+            sensor_timestamp=sensor_timestamp,
         )
 
     def get_latest_frames(self) -> dict[str, FrameSet] | None:

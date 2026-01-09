@@ -1,7 +1,8 @@
 """Driver for Luxonis cameras."""
 
+import logging
 from dataclasses import dataclass
-from typing import Self
+from typing import Self, TypedDict, cast
 
 import depthai as dai
 import numpy as np
@@ -12,6 +13,25 @@ from thor_slam.camera.utils import (
     get_luxonis_camera_valid_resolutions,
     get_luxonis_device,
 )
+
+logger = logging.getLogger(__name__)
+
+
+class IMUData(TypedDict):
+    """IMU sensor data from Luxonis camera.
+
+    Keys:
+        accelerometer: Accelerometer data [x, y, z] in m/s²
+        gyroscope: Gyroscope data [x, y, z] in rad/s
+        timestamp: Timestamp of the IMU reading in seconds
+        sequence_num: Sequence number of the IMU packet
+    """
+
+    accelerometer: np.ndarray  # [x, y, z] in m/s²
+    gyroscope: np.ndarray  # [x, y, z] in rad/s
+    timestamp: float
+    sequence_num: int
+
 
 # Supported resolutions as (width, height) tuples
 SUPPORTED_RESOLUTIONS: dict[str, tuple[int, int]] = {
@@ -80,6 +100,10 @@ class LuxonisCameraConfig:
     queue_blocking: bool = False  # If True, blocks when queue is full
     camera_mode: CameraSensorType = "MONO"
     read_imu: bool = False
+    imu_report_rate: int = 400  # IMU report rate in Hz
+    imu_batch_threshold: int = 1  # Number of IMU packets to batch before reporting
+    imu_max_batch_reports: int = 10  # Maximum number of batched reports
+    imu_raw: bool = False  # If True, returns raw IMU data
 
 
 class LuxonisCameraSource(CameraSource):
@@ -210,24 +234,28 @@ class LuxonisCameraSource(CameraSource):
                 maxSize=self.cfg.queue_size, blocking=self.cfg.queue_blocking
             )
 
-        # TODO: check that this works. Entirely tab completed.
-        # nvm it doesn't work
+        # Create IMU node if requested
         if self._has_sensor_data:
-            # # Create IMU node
-            # imu_node = self._pipeline.create(dai.node.IMU)
-            # imu_node.enableIMUData(True, 1000)
-            # imu_node.setBatchReportThreshold(1)
-            # imu_node.setMaxBatchReports(10)
-            # imu_node.setReportRate(100)
-            # imu_node.setGyroRange(dai.IMU.Range.M_2000)
-            # imu_node.setAccelRange(dai.IMU.Range.G_2)
+            # Create IMU node
+            imu_node = self._pipeline.create(dai.node.IMU)
 
-            # # Request output and create queue
-            # imu_output = imu_node.requestOutput(dai.IMU.Output.IMU_DATA)
-            # self._output_queues["imu"] = imu_output.createOutputQueue(
-            #     maxSize=self.cfg.queue_size, blocking=self.cfg.queue_blocking
-            # )
-            pass
+            # Enable accelerometer and gyroscope sensors
+            imu_node.enableIMUSensor(
+                dai.IMUSensor.ACCELEROMETER_RAW if self.cfg.imu_raw else dai.IMUSensor.ACCELEROMETER,
+                self.cfg.imu_report_rate,
+            )
+            imu_node.enableIMUSensor(
+                dai.IMUSensor.GYROSCOPE_RAW if self.cfg.imu_raw else dai.IMUSensor.GYROSCOPE_CALIBRATED,
+                self.cfg.imu_report_rate,
+            )
+
+            # Configure batch reporting
+            imu_node.setBatchReportThreshold(self.cfg.imu_batch_threshold)
+            imu_node.setMaxBatchReports(self.cfg.imu_max_batch_reports)
+
+            imu_queue = imu_node.out.createOutputQueue(maxSize=self.cfg.queue_size, blocking=self.cfg.queue_blocking)
+
+            self._output_queues["imu"] = imu_queue
 
         # Start the pipeline
         self._pipeline.start()
@@ -470,13 +498,105 @@ class LuxonisCameraSource(CameraSource):
         """Check if the camera source has sensor data."""
         return self._has_sensor_data
 
-    def get_sensor_data(self) -> dict:
-        """Get the sensor data of the camera source."""
+    def _process_imu_data(self, imu_data: dai.IMUData) -> list[IMUData]:
+        """Process IMU data packets into IMUData objects.
+
+        Args:
+            imu_data: Raw IMU data from DepthAI queue.
+
+        Returns:
+            List of IMUData objects extracted from the packets.
+        """
+        imu_packets = []
+        for packet in imu_data.packets:
+            # Extract accelerometer data
+            accel = packet.acceleroMeter
+            accelerometer = np.array([accel.x, accel.y, accel.z])
+
+            # Extract gyroscope data
+            gyro = packet.gyroscope
+            gyroscope = np.array([gyro.x, gyro.y, gyro.z])
+
+            # Extract timestamp (use device timestamp for accuracy)
+            timestamp = packet.acceleroMeter.getTimestamp().total_seconds()
+
+            # Extract sequence number
+            sequence_num = packet.acceleroMeter.getSequenceNum()
+
+            imu_packets.append(
+                IMUData(
+                    accelerometer=accelerometer,
+                    gyroscope=gyroscope,
+                    timestamp=timestamp,
+                    sequence_num=sequence_num,
+                )
+            )
+
+        return imu_packets
+
+    def get_timestamped_sensor_data(self) -> tuple[dict | None, float | None]:
+        """Get the timestamped sensor data of the camera source (blocking).
+
+        Returns:
+            Tuple of (IMUData object if available, timestamp if available), or (None, None) if no data available.
+        """
         if not self._has_sensor_data:
-            return {}
+            return None, None
 
-        raise NotImplementedError("IMU data not supported yet")
+        if "imu" not in self._output_queues:
+            return {}, None
 
-        # imu_data = self._output_queues["imu"].get()
-        # TODO: convert this to proper format. Probably make a dataclass that inherits from generic sensor data class.
-        return {}
+        if not self._running:
+            raise RuntimeError("Camera source not started. Call start() first.")
+
+        try:
+            # Get IMU data from queue (blocking)
+            imu_data = self._output_queues["imu"].get()
+
+            assert isinstance(imu_data, dai.IMUData)
+            # Process IMU packets
+            imu_packets = self._process_imu_data(imu_data)
+
+            # Return the latest IMU data and all packets
+            return (cast(dict, imu_packets[-1])) if imu_packets else None, (
+                imu_packets[-1]["timestamp"] if imu_packets else None
+            )
+
+        except Exception as e:
+            logger.warning("Failed to get IMU data: %s", e)
+            return {}, None
+
+    def try_get_timestamped_sensor_data(self) -> tuple[dict | None, float | None]:
+        """Try to get timestamped sensor data without blocking.
+
+        Returns:
+            Tuple of (IMUData object if available, timestamp if available), or (None, None) if no data available.
+        """
+        if not self._has_sensor_data:
+            return None, None
+
+        if "imu" not in self._output_queues:
+            return None, None
+
+        if not self._running:
+            return None, None
+
+        try:
+            # Try to get IMU data from queue (non-blocking)
+            imu_data = self._output_queues["imu"].tryGet()
+
+            if imu_data is None:
+                return None
+
+            assert isinstance(imu_data, dai.IMUData)
+
+            # Process IMU packets
+            imu_packets = self._process_imu_data(imu_data)
+            # Return the latest IMU data and all packets
+            return (cast(dict, imu_packets[-1])) if imu_packets else None, (
+                imu_packets[-1]["timestamp"] if imu_packets else None
+            )
+
+        except Exception as e:
+            logger.warning("Failed to get IMU data: %s", e)
+            return None, None
