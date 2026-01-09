@@ -181,24 +181,14 @@ class LuxonisCameraSource(CameraSource):
             left_camera.setSensorType(self._camera_mode)
             right_camera.setSensorType(self._camera_mode)
 
-            # Request outputs from cameras for linking to StereoDepth (v3 API: ensures correct stride)
+            # Request outputs and create queues
             left_output = left_camera.requestOutput(size=resolution, fps=fps)
             right_output = right_camera.requestOutput(size=resolution, fps=fps)
 
-            # Create StereoDepth node for rectification
-            stereo = self._pipeline.create(dai.node.StereoDepth)
-            stereo.setLeftRightCheck(False)  # Save computation, we just want rectification
-            stereo.setDepthAlign(dai.CameraBoardSocket.CAM_B)
-
-            # Link camera outputs to stereo node (v3 API: use requestOutput outputs)
-            left_output.link(stereo.left)
-            right_output.link(stereo.right)
-
-            # Create queues for rectified outputs (v3 API: rectifiedLeft/Right are Output objects)
-            self._output_queues["left"] = stereo.rectifiedLeft.createOutputQueue(
+            self._output_queues["left"] = left_output.createOutputQueue(
                 maxSize=self.cfg.queue_size, blocking=self.cfg.queue_blocking
             )
-            self._output_queues["right"] = stereo.rectifiedRight.createOutputQueue(
+            self._output_queues["right"] = right_output.createOutputQueue(
                 maxSize=self.cfg.queue_size, blocking=self.cfg.queue_blocking
             )
         else:
@@ -228,17 +218,14 @@ class LuxonisCameraSource(CameraSource):
         intrinsics_list: list[Intrinsics] = []
 
         if self.cfg.stereo:
-            # For stereo cameras with rectification, return rectified intrinsics
-            # Rectified images have zero distortion (plumb_bob model with all zeros)
-            # Use original intrinsics matrix (rectification typically preserves K)
+            # For stereo cameras, return both left and right intrinsics
             # Left camera (CAM_B)
             left_matrix = np.array(
                 self._calib_data.getCameraIntrinsics(
                     dai.CameraBoardSocket.CAM_B, self.cfg.resolution.width, self.cfg.resolution.height
                 )
             )
-            # Rectified images have zero distortion
-            left_coeffs = np.zeros(5)  # plumb_bob: [k1, k2, p1, p2, k3]
+            left_coeffs = np.array(self._calib_data.getDistortionCoefficients(dai.CameraBoardSocket.CAM_B))
             intrinsics_list.append(
                 Intrinsics(
                     width=self.cfg.resolution.width,
@@ -248,14 +235,13 @@ class LuxonisCameraSource(CameraSource):
                 )
             )
 
-            # Right camera (CAM_C) - rectified
+            # Right camera (CAM_C)
             right_matrix = np.array(
                 self._calib_data.getCameraIntrinsics(
                     dai.CameraBoardSocket.CAM_C, self.cfg.resolution.width, self.cfg.resolution.height
                 )
             )
-            # Rectified images have zero distortion
-            right_coeffs = np.zeros(5)  # plumb_bob: [k1, k2, p1, p2, k3]
+            right_coeffs = np.array(self._calib_data.getDistortionCoefficients(dai.CameraBoardSocket.CAM_C))
             intrinsics_list.append(
                 Intrinsics(
                     width=self.cfg.resolution.width,

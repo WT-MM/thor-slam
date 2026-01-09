@@ -53,21 +53,12 @@ isaac-ros-launch:
 	ros2 launch ./launch/thor_visual_slam.launch.py \
 		num_cameras:=$(NUM_CAMERAS) \
 		enable_slam_visualization:=true \
-		rectified_images:=true \
+		rectified_images:=false \
+		enable_imu_fusion:=false \
 		enable_landmarks_view:=true \
 		enable_observations_view:=true \
 		enable_localization_n_mapping:=true \
-		enable_imu_fusion:=false \
-
-	# ros2 launch isaac_ros_visual_slam isaac_ros_visual_slam.launch.py \
-	# 	num_cameras:=$(NUM_CAMERAS) \
-	# 	enable_slam_visualization:=true \
-	# 	rectified_images:=true \
-	# 	enable_landmarks_view:=true \
-	# 	enable_observations_view:=true \
-	# 	enable_localization_n_mapping:=true \
-	# 	verbosity:=1 \
-	# 	enable_debug_mode:=true
+		enable_debug_mode:=false \
 
 # ============================================ #
 #              Thor SLAM Bridge                #
