@@ -51,6 +51,7 @@ def get_luxonis_camera_valid_resolutions(device: dai.Device, socket: dai.CameraB
     logger.warning("No valid resolutions found for device %s with socket %s", device.getMxId(), socket)
     return []
 
+
 # TODO: write tests to make sure this is correct.
 # e.g. make an onshape with something 1m in x, 0.5m in y, 0.25m in z and check the transform. Also check roll pitch yaw.
 def parse_urdf_transform(joint_elem: ET.Element) -> np.ndarray:
@@ -128,6 +129,6 @@ def load_rig_extrinsics_from_urdf(urdf_path: str | Path, camera_map: dict[str, s
                 break
 
         if not found:
-            logger.warning("Could not find URDF link matching '%s' for source %s", link_substring, source_name)
+            logger.warning("Could not find URDF link matching '%s' for source %s", link_name, source_name)
 
     return extrinsics_out

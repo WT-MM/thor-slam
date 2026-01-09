@@ -1,62 +1,119 @@
 # Makefile
 
-define HELP_MESSAGE
-thor-slam
+.PHONY: all install install-dev format static-checks test \
+        isaac-ros-launch slam-run ros2-topics clean
 
-# Installing
-
-1. Create a new Conda environment: `conda create --name thor-slam python=3.11`
-2. Activate the environment: `conda activate thor-slam`
-3. Install the package: `make install-dev`
-
-# Running Tests
-
-1. Run autoformatting: `make format`
-2. Run static checks: `make static-checks`
-3. Run unit tests: `make test`
-
-endef
-export HELP_MESSAGE
+# ============================================ #
+#                    Help                      #
+# ============================================ #
 
 all:
-	@echo "$$HELP_MESSAGE"
-.PHONY: all
+	@echo "thor-slam - Visual SLAM for Thor robot"
+	@echo ""
+	@echo "Quick Start:"
+	@echo "  Terminal 1:  make isaac-ros-launch              # Start Isaac ROS (2 cams)"
+	@echo "  Terminal 2:  make slam-run CAMERA=192.168.2.21  # Start camera bridge"
+	@echo ""
+	@echo "Multi-camera:"
+	@echo "  make isaac-ros-launch NUM_CAMERAS=4"
+	@echo "  make slam-run CAMERA=192.168.2.21,192.168.2.22 NUM_CAMERAS=4"
+	@echo ""
+	@echo "Commands:"
+	@echo "  make isaac-ros-launch  - Launch Isaac ROS Visual SLAM"
+	@echo "  make slam-run          - Run camera bridge"
+	@echo "  make ros2-topics       - List ROS2 topics"
+	@echo "  make format            - Format code"
+	@echo "  make static-checks     - Run linters"
+	@echo "  make test              - Run tests"
 
-# ------------------------ #
-#        PyPI Build        #
-# ------------------------ #
+# ============================================ #
+#                Configuration                 #
+# ============================================ #
 
-build-for-pypi:
-	@pip install --verbose build wheel twine
-	@python -m build --sdist --wheel --outdir dist/ .
-	@twine upload dist/*
-.PHONY: build-for-pypi
+# Number of cameras (2 for stereo, 4 for two stereo pairs, etc.)
+NUM_CAMERAS ?= 2
 
-push-to-pypi: build-for-pypi
-	@twine upload dist/*
-.PHONY: push-to-pypi
+# Camera IP(s) - comma separated for multiple
+CAMERA ?= 192.168.2.21
 
-# ------------------------ #
-#       Static Checks      #
-# ------------------------ #
+# FPS
+FPS ?= 10
 
-py-files := $(shell find scripts thor_slam -name '*.py')
+# ============================================ #
+#              Isaac ROS Launch                #
+# ============================================ #
+
+# Launch Isaac ROS Visual SLAM node
+# Topics: /visual_slam/image_0..N, /visual_slam/camera_info_0..N
+isaac-ros-launch:
+	@echo "Launching Isaac ROS Visual SLAM ($(NUM_CAMERAS) cameras)..."
+	@echo "Expected topics:"
+	@for i in $$(seq 0 $$(($(NUM_CAMERAS) - 1))); do echo "  /visual_slam/image_$$i"; done
+	@echo ""
+	ros2 launch isaac_ros_visual_slam isaac_ros_visual_slam.launch.py \
+		num_cameras:=$(NUM_CAMERAS) \
+		enable_slam_visualization:=true \
+		rectified_images:=false \
+		enable_landmarks_view:=true \
+		enable_observations_view:=true \
+		enable_localization_n_mapping:=true \
+		verbosity:=1 \
+		enable_debug_mode:=true
+
+# ============================================ #
+#              Thor SLAM Bridge                #
+# ============================================ #
+
+# Run the camera bridge
+slam-run:
+	python -m scripts.run_slam --camera-ips $(CAMERA) --num-cameras $(NUM_CAMERAS) --fps $(FPS)
+
+slam-run-headless:
+	python -m scripts.run_slam --camera-ips $(CAMERA) --num-cameras $(NUM_CAMERAS) --fps $(FPS) --no-display
+
+# ============================================ #
+#                 ROS2 Utils                   #
+# ============================================ #
+
+ros2-topics:
+	@echo "Visual SLAM topics:"
+	@ros2 topic list 2>/dev/null | grep visual_slam || echo "  (none - is Isaac ROS running?)"
+
+rviz:
+	@echo "Launching RViz with Visual SLAM visualization..."
+	rviz2 -d $$(ros2 pkg prefix isaac_ros_visual_slam --share)/rviz/default.rviz 2>/dev/null || rviz2
+
+ros2-hz:
+	@echo "Checking image_0 rate..."
+	@timeout 3 ros2 topic hz /visual_slam/image_0 2>/dev/null || echo "No data"
+
+ros2-odom:
+	ros2 topic echo /visual_slam/tracking/odometry
+
+# ============================================ #
+#               Development                    #
+# ============================================ #
+
+install:
+	pip install -e .
+
+install-dev:
+	pip install -e ".[dev]"
+
+py-files := $(shell find scripts thor_slam -name '*.py' 2>/dev/null)
 
 format:
 	@black $(py-files)
 	@ruff format $(py-files)
-.PHONY: format
 
 static-checks:
 	@black --diff --check $(py-files)
 	@ruff check $(py-files)
 	@mypy --install-types --non-interactive $(py-files)
-.PHONY: lint
-
-# ------------------------ #
-#        Unit tests        #
-# ------------------------ #
 
 test:
 	python -m pytest
-.PHONY: test
+
+clean:
+	rm -rf build/ dist/ *.egg-info .mypy_cache .pytest_cache
+	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true

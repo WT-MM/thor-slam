@@ -270,7 +270,10 @@ class LuxonisCameraSource(CameraSource):
         return self._intrinsics
 
     def get_extrinsics(self) -> list[Extrinsics]:
-        """Get the extrinsics of the camera source. If stereo, returns [left, right]."""
+        """Get the extrinsics of the camera source. If stereo, returns [left, right].
+
+        Note: DepthAI returns translation in centimeters, so we convert to meters.
+        """
         if self._extrinsics is not None:
             return self._extrinsics
 
@@ -280,11 +283,15 @@ class LuxonisCameraSource(CameraSource):
             left_to_center_matrix = np.array(
                 self._calib_data.getCameraExtrinsics(dai.CameraBoardSocket.CAM_B, dai.CameraBoardSocket.CAM_A)
             )
+            # Convert translation from cm to meters
+            left_to_center_matrix[:3, 3] /= 100.0
             extrinsics_list.append(Extrinsics.from_4x4_matrix(left_to_center_matrix))
 
             right_to_center_matrix = np.array(
                 self._calib_data.getCameraExtrinsics(dai.CameraBoardSocket.CAM_C, dai.CameraBoardSocket.CAM_A)
             )
+            # Convert translation from cm to meters
+            right_to_center_matrix[:3, 3] /= 100.0
             extrinsics_list.append(Extrinsics.from_4x4_matrix(right_to_center_matrix))
         else:
             # For RGB cameras, return identity (no relative transformation)

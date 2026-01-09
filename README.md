@@ -33,3 +33,11 @@ pip install -e .
 ### Useful tips
 
 - Get a urdf from Onshape with [onshnap](https://github.com/WT-MM/onshnap)
+
+To rviz the isaac_ros_visual_slam node, you can use the following command:
+```bash
+rviz2 -d $(ros2 pkg prefix
+isaac_ros_visual_slam
+--share)/rviz
+/default.cfg.rviz
+```
