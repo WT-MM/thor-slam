@@ -13,12 +13,12 @@ from dataclasses import dataclass
 import numpy as np
 import rclpy
 from cv_bridge import CvBridge  # type: ignore[import-not-found]
-from geometry_msgs.msg import TransformStamped  # type: ignore[import-untyped]
-from nav_msgs.msg import Odometry  # type: ignore[import-untyped]
+from geometry_msgs.msg import TransformStamped
+from nav_msgs.msg import Odometry
 from rclpy.node import Node
 from scipy.spatial.transform import Rotation
-from sensor_msgs.msg import CameraInfo, Image  # type: ignore[import-untyped]
-from tf2_ros import StaticTransformBroadcaster  # type: ignore[import-untyped]
+from sensor_msgs.msg import CameraInfo, Image
+from tf2_ros import StaticTransformBroadcaster
 
 from thor_slam.camera.rig import RigCalibration
 from thor_slam.camera.types import Extrinsics, SynchronizedFrameSet

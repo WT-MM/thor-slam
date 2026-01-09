@@ -31,9 +31,9 @@ incremental = true
 namespace_packages = false
 
 # Uncomment to exclude modules from Mypy.
-# [[tool.mypy.overrides]]
-# module = []
-# ignore_missing_imports = true
+[[tool.mypy.overrides]]
+module = ["geometry_msgs.*", "nav_msgs.*", "sensor_msgs.*", "tf2_ros", "rclpy.*", "rclpy"]
+ignore_missing_imports = true
 
 [tool.isort]
 
