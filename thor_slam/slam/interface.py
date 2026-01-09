@@ -10,7 +10,7 @@ import numpy as np
 from scipy.spatial.transform import Rotation
 
 from thor_slam.camera.rig import RigCalibration
-from thor_slam.camera.types import SynchronizedFrameSet
+from thor_slam.camera.types import Extrinsics, Intrinsics, SynchronizedFrameSet
 
 
 class TrackingState(Enum):
@@ -22,6 +22,14 @@ class TrackingState(Enum):
     LOST = auto()  # Tracking lost, attempting recovery
     RELOCALIZING = auto()  # Attempting to relocalize in known map
 
+@dataclass
+class CameraConfig:
+    """Config for a single camera, extracted from RigCalibration at init."""
+
+    intrinsics: Intrinsics
+    extrinsics: Extrinsics
+    source_name: str
+    cam_idx: int  # Index within source (0=left, 1=right for stereo)
 
 @dataclass
 class SlamPose:

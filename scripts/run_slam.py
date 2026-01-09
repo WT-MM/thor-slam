@@ -80,7 +80,7 @@ def detect_cameras(ips: list[str]) -> list[dict]:
 
 
 def create_sources(cameras: list[dict], fps: int) -> list:
-    """Create camera sources with smallest common resolution."""
+    """Create camera sources with largest common resolution."""
     # Find common resolutions
     common = set(cameras[0]["resolutions"])
     for cam in cameras[1:]:
@@ -89,8 +89,8 @@ def create_sources(cameras: list[dict], fps: int) -> list:
     if not common:
         raise RuntimeError("No common resolution found")
 
-    # Use smallest
-    resolution = min(common, key=lambda r: r[0] * r[1])
+    # Use largest
+    resolution = max(common, key=lambda r: r[0] * r[1])
     print(f"  Resolution: {resolution[0]}x{resolution[1]}")
 
     # Wait for devices to be released after detection

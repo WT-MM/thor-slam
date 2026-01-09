@@ -22,19 +22,9 @@ from tf2_ros import StaticTransformBroadcaster  # type: ignore[import-untyped]
 
 from thor_slam.camera.rig import RigCalibration
 from thor_slam.camera.types import Extrinsics, Intrinsics, SynchronizedFrameSet
-from thor_slam.slam.interface import SlamConfig, SlamEngine, SlamMap, SlamPose, TrackingState
+from thor_slam.slam.interface import CameraConfig, SlamConfig, SlamEngine, SlamMap, SlamPose, TrackingState
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass
-class CameraConfig:
-    """Config for a single camera, extracted from RigCalibration at init."""
-
-    intrinsics: Intrinsics
-    extrinsics: Extrinsics
-    source_name: str
-    cam_idx: int  # Index within source (0=left, 1=right for stereo)
 
 
 @dataclass
@@ -70,7 +60,6 @@ class IsaacRosAdapter(SlamEngine):
 
     def initialize(self, calibration: RigCalibration, config: SlamConfig | None = None) -> None:
         """Initialize with calibration data."""
-        # Extract camera configs from calibration (just once!)
         self._cameras = self._extract_cameras(calibration)
 
         if len(self._cameras) < self._num_cameras:
@@ -182,8 +171,8 @@ class IsaacRosAdapter(SlamEngine):
             raise RuntimeError("Not initialized")
 
         self._frame_count += 1
-        # Use current ROS time (wall clock), not camera device timestamp
-        # Camera timestamps are relative to device boot, not Unix epoch
+        
+        # TODO: switch this back to frame_set timestamp. Check monotonicity
         stamp = self._node.get_clock().now().to_msg()
 
         # Map frames to global camera indices
@@ -198,12 +187,12 @@ class IsaacRosAdapter(SlamEngine):
             frame = fs.frames[cam.cam_idx]
             frame_id = f"camera_{i}"
 
-            # Publish image - use mono8 for grayscale (better for stereo VSLAM)
             img = frame.image
             if len(img.shape) == 2:
                 img_msg = self._bridge.cv2_to_imgmsg(img, encoding="mono8")
             else:
                 img_msg = self._bridge.cv2_to_imgmsg(img, encoding="bgr8")
+
             img_msg.header.stamp = stamp
             img_msg.header.frame_id = frame_id
             self._image_pubs[i].publish(img_msg)
@@ -243,6 +232,8 @@ class IsaacRosAdapter(SlamEngine):
                 # Compute baseline in left camera frame: T_lr = inv(T_l) * T_r
                 rot_l = left_cam.extrinsics.rotation
                 t_l, t_r = left_cam.extrinsics.translation, cam.extrinsics.translation
+
+                # TODO: check if this is correct.
                 t_lr = rot_l.T @ (t_r - t_l)  # Transform to left camera frame
 
                 baseline = float(t_lr[0])  # x component in left camera frame
