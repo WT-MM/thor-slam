@@ -53,7 +53,7 @@ isaac-ros-launch:
 	ros2 launch isaac_ros_visual_slam isaac_ros_visual_slam.launch.py \
 		num_cameras:=$(NUM_CAMERAS) \
 		enable_slam_visualization:=true \
-		rectified_images:=false \
+		rectified_images:=true \
 		enable_landmarks_view:=true \
 		enable_observations_view:=true \
 		enable_localization_n_mapping:=true \

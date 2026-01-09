@@ -216,7 +216,16 @@ class IsaacRosAdapter(SlamEngine):
             info.height = cam.intrinsics.height
             d = cam.intrinsics.coeffs.flatten().tolist()
 
-            if len(d) >= 8:
+            # For rectified images: always use plumb_bob with zero distortion
+            # Check if all distortion coefficients are zero (rectified images)
+            d_array = np.array(d)
+            is_rectified = len(d_array) > 0 and np.allclose(d_array, 0.0)
+
+            if is_rectified:
+                # Rectified images: plumb_bob with zero distortion
+                info.distortion_model = "plumb_bob"
+                info.d = [0.0, 0.0, 0.0, 0.0, 0.0]
+            elif len(d) >= 8:
                 info.distortion_model = "rational_polynomial"
                 info.d = d[:8]  # k1 k2 p1 p2 k3 k4 k5 k6
             elif len(d) == 5:
