@@ -121,6 +121,17 @@ class CameraSource(ABC):
         """Get the extrinsics of the camera source."""
         pass
 
+    @abstractmethod
+    def get_sensor_data(self) -> dict:
+        """Get the (optional) sensor data of the camera source. E.g. imu data."""
+        pass
+
+    @abstractmethod
+    @property
+    def has_sensor_data(self) -> bool:
+        """Check if the camera source has sensor data."""
+        pass
+
 
 @dataclass
 class FrameSet:
@@ -131,11 +142,13 @@ class FrameSet:
 
     Each frame has its own timestamp (accessible via frames[i].timestamp).
     The `timestamp` field is a reference timestamp (typically from the first frame).
+    The `sensor_data` field is an optional dictionary of sensor data. E.g. imu data.
     """
 
     timestamp: float  # Reference timestamp
     frames: list[CameraFrame]
     source_name: str
+    sensor_data: dict | None = None
 
     @classmethod
     def from_frames(cls, frames: list[CameraFrame], source_name: str) -> Self:
@@ -174,6 +187,7 @@ class SynchronizedFrameSet:
     timestamp: float  # The reference timestamp (from the slowest camera)
     frame_sets: dict[str, FrameSet]  # source_name -> FrameSet
     max_time_delta: float  # Maximum time difference between any frame and reference
+    sensor_data: dict | None = None
 
     def get_all_frames(self) -> list[CameraFrame]:
         """Get all frames from all sources as a flat list."""

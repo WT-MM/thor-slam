@@ -21,7 +21,7 @@ from sensor_msgs.msg import CameraInfo, Image  # type: ignore[import-untyped]
 from tf2_ros import StaticTransformBroadcaster  # type: ignore[import-untyped]
 
 from thor_slam.camera.rig import RigCalibration
-from thor_slam.camera.types import Extrinsics, Intrinsics, SynchronizedFrameSet
+from thor_slam.camera.types import Extrinsics, SynchronizedFrameSet
 from thor_slam.slam.interface import CameraConfig, SlamConfig, SlamEngine, SlamMap, SlamPose, TrackingState
 
 logger = logging.getLogger(__name__)
@@ -171,7 +171,7 @@ class IsaacRosAdapter(SlamEngine):
             raise RuntimeError("Not initialized")
 
         self._frame_count += 1
-        
+
         # TODO: switch this back to frame_set timestamp. Check monotonicity
         stamp = self._node.get_clock().now().to_msg()
 

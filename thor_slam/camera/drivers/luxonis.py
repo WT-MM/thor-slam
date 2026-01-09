@@ -79,6 +79,7 @@ class LuxonisCameraConfig:
     queue_size: int = 8  # Size of output queues
     queue_blocking: bool = False  # If True, blocks when queue is full
     camera_mode: CameraSensorType = "MONO"
+    read_imu: bool = False
 
 
 class LuxonisCameraSource(CameraSource):
@@ -92,6 +93,7 @@ class LuxonisCameraSource(CameraSource):
     _output_queues: dict[str, dai.MessageQueue]
     _running: bool
     _valid_resolutions: list[tuple[int, int]]
+    _has_sensor_data: bool
 
     def __init__(self, cfg: LuxonisCameraConfig) -> None:
         """Initialize the camera source."""
@@ -105,6 +107,7 @@ class LuxonisCameraSource(CameraSource):
         self._running = False
         self._output_queues = {}
         self._pipeline = None
+        self._has_sensor_data = cfg.read_imu
 
         sockets_to_check = (
             [dai.CameraBoardSocket.CAM_B, dai.CameraBoardSocket.CAM_C]
@@ -206,6 +209,25 @@ class LuxonisCameraSource(CameraSource):
             self._output_queues["rgb"] = rgb_output.createOutputQueue(
                 maxSize=self.cfg.queue_size, blocking=self.cfg.queue_blocking
             )
+
+        # TODO: check that this works. Entirely tab completed.
+        # nvm it doesn't work
+        if self._has_sensor_data:
+            # # Create IMU node
+            # imu_node = self._pipeline.create(dai.node.IMU)
+            # imu_node.enableIMUData(True, 1000)
+            # imu_node.setBatchReportThreshold(1)
+            # imu_node.setMaxBatchReports(10)
+            # imu_node.setReportRate(100)
+            # imu_node.setGyroRange(dai.IMU.Range.M_2000)
+            # imu_node.setAccelRange(dai.IMU.Range.G_2)
+
+            # # Request output and create queue
+            # imu_output = imu_node.requestOutput(dai.IMU.Output.IMU_DATA)
+            # self._output_queues["imu"] = imu_output.createOutputQueue(
+            #     maxSize=self.cfg.queue_size, blocking=self.cfg.queue_blocking
+            # )
+            pass
 
         # Start the pipeline
         self._pipeline.start()
@@ -442,3 +464,19 @@ class LuxonisCameraSource(CameraSource):
             )
 
         return frames
+
+    @property
+    def has_sensor_data(self) -> bool:
+        """Check if the camera source has sensor data."""
+        return self._has_sensor_data
+
+    def get_sensor_data(self) -> dict:
+        """Get the sensor data of the camera source."""
+        if not self._has_sensor_data:
+            return {}
+
+        raise NotImplementedError("IMU data not supported yet")
+
+        # imu_data = self._output_queues["imu"].get()
+        # TODO: convert this to proper format. Probably make a dataclass that inherits from generic sensor data class.
+        return {}

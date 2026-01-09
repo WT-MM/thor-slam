@@ -22,6 +22,7 @@ class TrackingState(Enum):
     LOST = auto()  # Tracking lost, attempting recovery
     RELOCALIZING = auto()  # Attempting to relocalize in known map
 
+
 @dataclass
 class CameraConfig:
     """Config for a single camera, extracted from RigCalibration at init."""
@@ -30,6 +31,7 @@ class CameraConfig:
     extrinsics: Extrinsics
     source_name: str
     cam_idx: int  # Index within source (0=left, 1=right for stereo)
+
 
 @dataclass
 class SlamPose:
