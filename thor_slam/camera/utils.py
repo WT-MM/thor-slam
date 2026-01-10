@@ -71,7 +71,7 @@ def parse_urdf_transform(joint_elem: ET.Element) -> np.ndarray:
 
     # Convert Euler to Rotation Matrix
     # URDF uses extrinsic XYZ rotation (Roll around X, then Pitch around Y, then Yaw around Z)
-    rotation = R.from_euler("xyz", rpy, degrees=False)
+    rotation = R.from_euler("XYZ", rpy, degrees=False)
     rot_matrix = rotation.as_matrix()
 
     # Build 4x4 Homogeneous Matrix
