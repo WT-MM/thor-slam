@@ -43,7 +43,7 @@ class Extrinsics:
     """Extrinsics of a camera."""
 
     rotation: np.ndarray  # 3x3
-    translation: np.ndarray  # 3x1
+    translation: np.ndarray  # 3x1 (units in meters)
 
     @classmethod
     def from_4x4_matrix(cls, matrix: np.ndarray | list[list[float]]) -> Self:

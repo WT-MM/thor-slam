@@ -63,16 +63,52 @@ you can run `make rviz` to launch the rviz2 visualizer
 
 Luxonis cameras use the following coordinate convention:
 
-- X: Up
-- Y: Right
+- X: Right
+- Y: Down
 - Z: Forward (direction of camera outwards)
+
+However the IMU convention is dependent on camera model.
+
+The OAK D Pro uses the following:
+- X up
+- Y left
+- Z back
+
+The Oak D Long Range uses:
+
+- X right
+- Y down
+- Z forward
 
 isaac ros uses:
  +x = forward
  +y = left
- +z = up # check this
+ +z = up # check this (https://nvidia-isaac-ros.github.io/repositories_and_packages/isaac_ros_mapping_and_localization/isaac_ros_visual_global_localization/index.html)
 
  Camera optical frames (for cuVSLAM) need to be
  +z forward (out through lens)
  +y down
  +x right
+
+ So alignment is same for camera to base_link, but depending on camera type need to rotate the imu data to match the camera optical frame.
+
+ Furthermore, need to make sure urdf coordinates are aligned with the RDF convention.
+
+
+### Scratch
+```python
+
+# luxonis in RDF, cuvslam in FLU
+rdf_to_flu_matrix = np.array([
+    [0, 0, 1, 0],
+    [-1, 0, 0, 0],
+    [0, -1, 0, 0],
+    [0, 0, 0, 1],
+])
+
+# usage
+point_in_rdf = np.array([1, 0, 0, 1])
+point_in_flu = rdf_to_flu_matrix @ point_in_rdf
+print(point_in_flu)
+
+```

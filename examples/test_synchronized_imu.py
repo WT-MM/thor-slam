@@ -229,9 +229,10 @@ def test_synchronized_imu(
         config = LuxonisCameraConfig(
             ip=ip,
             stereo=True,
-            resolution=LuxonisResolution.from_name(resolution),
+            resolution=LuxonisResolution.from_name("1200"),#resolution),
             fps=fps,
             read_imu=(imu_source_ip is None and i == 0) or (imu_source_ip == ip),
+            camera_mode="COLOR",
             imu_report_rate=imu_rate,
         )
 
@@ -345,7 +346,6 @@ def test_synchronized_imu(
 
                 # Calculate timestamp delta between frame and IMU
                 timestamp_delta = abs(sync_frames.sensor_timestamp - sync_frames.timestamp)
-                breakpoint()
                 imu_timestamp_deltas.append(timestamp_delta)
 
                 # Get IMU data (should be IMUData object directly)

@@ -330,6 +330,11 @@ class LuxonisCameraSource(CameraSource):
         extrinsics_list: list[Extrinsics] = []
 
         if self.cfg.stereo:
+            # This returns where the left camera is relative to the center camera
+            # (so if our coordinate system has x positive right, then left_to_center_matrix[0, 3] is negative)
+            # i.e. the translation is in center camera coordinate frame.
+            # Then our matrix of left_to_center can be multiplied by a point in the left camera coordinate
+            # frame to get a point in the center camera coordinate frame.
             left_to_center_matrix = np.array(
                 self._calib_data.getCameraExtrinsics(dai.CameraBoardSocket.CAM_B, dai.CameraBoardSocket.CAM_A)
             )

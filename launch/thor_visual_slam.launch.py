@@ -47,7 +47,7 @@ def generate_launch_description():
         DeclareLaunchArgument('num_cameras', default_value='2'),
         DeclareLaunchArgument('rectified_images', default_value='True'),
         DeclareLaunchArgument('enable_imu_fusion', default_value='True'),
-        DeclareLaunchArgument('imu_frame', default_value='imu'),
+        DeclareLaunchArgument('imu_frame', default_value='imu_link'),
         DeclareLaunchArgument('enable_slam_visualization', default_value='True'),
         DeclareLaunchArgument('enable_landmarks_view', default_value='True'),
         DeclareLaunchArgument('enable_observations_view', default_value='True'),

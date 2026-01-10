@@ -21,6 +21,7 @@ import time
 
 import cv2
 import depthai as dai
+import numpy as np
 
 from thor_slam.camera.drivers.luxonis import (
     LuxonisCameraConfig,
@@ -28,7 +29,7 @@ from thor_slam.camera.drivers.luxonis import (
     LuxonisResolution,
 )
 from thor_slam.camera.rig import CameraRig
-from thor_slam.camera.types import IPv4
+from thor_slam.camera.types import Extrinsics, IPv4
 from thor_slam.camera.utils import (
     get_luxonis_camera_valid_modes,
     get_luxonis_camera_valid_resolutions,
@@ -79,7 +80,7 @@ def detect_cameras(ips: list[str]) -> list[dict]:
     return cameras
 
 
-def create_sources(cameras: list[dict], fps: int) -> list:
+def create_sources(cameras: list[dict], fps: int) -> tuple[list[LuxonisCameraSource], str | None]:
     """Create camera sources with largest common resolution."""
     # Find common resolutions
     common = set(cameras[0]["resolutions"])
@@ -97,6 +98,7 @@ def create_sources(cameras: list[dict], fps: int) -> list:
     time.sleep(1.0)
 
     sources = []
+    first_ip = cameras[0]["ip"] if cameras else None
     for cam in cameras:
         config = LuxonisCameraConfig(
             ip=cam["ip"],
@@ -106,11 +108,15 @@ def create_sources(cameras: list[dict], fps: int) -> list:
             queue_size=8,
             queue_blocking=False,
             camera_mode="MONO" if cam["mono"] else "COLOR",
+            read_imu=(cam["ip"] == first_ip),  # Enable IMU on first camera
+            imu_report_rate=400,
         )
-        sources.append(LuxonisCameraSource(config))
-        print(f"  ✓ {cam['ip']}")
+        source = LuxonisCameraSource(config)
+        sources.append(source)
+        imu_status = " (IMU enabled)" if cam["ip"] == first_ip else ""
+        print(f"  ✓ {cam['ip']}{imu_status}")
 
-    return sources
+    return sources, first_ip
 
 
 def run(camera_ips: list[str], num_cameras: int, fps: int, display: bool) -> None:
@@ -135,13 +141,27 @@ def run(camera_ips: list[str], num_cameras: int, fps: int, display: bool) -> Non
 
         # Create sources
         print("\nCreating camera sources...")
-        sources = create_sources(cameras, fps)
+        sources, first_ip = create_sources(cameras, fps)
 
         # Create rig
         print("\nStarting camera rig...")
-        rig = CameraRig(sources=sources, queue_size=30)
+
+        imu_extrinsics = Extrinsics.from_4x4_matrix(
+            np.array(
+                [
+                    [0, 0, -1, 0],
+                    [0, 1, 0, 0],
+                    [1, 0, 0, 0],
+                    [1, 0, 0, 1],
+                ]
+            )
+        )
+        # Use first camera as IMU source (name is the IP address)
+        rig = CameraRig(sources=sources, queue_size=30, imu_source=first_ip, imu_extrinsics=imu_extrinsics)
         rig.start()
         print("  ✓ Rig started")
+        if first_ip:
+            print(f"  ✓ IMU source: {first_ip}")
 
         # Create SLAM adapter
         print("\nInitializing SLAM adapter...")

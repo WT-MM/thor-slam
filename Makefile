@@ -54,7 +54,7 @@ isaac-ros-launch:
 		num_cameras:=$(NUM_CAMERAS) \
 		enable_slam_visualization:=true \
 		rectified_images:=false \
-		enable_imu_fusion:=false \
+		enable_imu_fusion:=true \
 		enable_landmarks_view:=true \
 		enable_observations_view:=true \
 		enable_localization_n_mapping:=true \
@@ -81,7 +81,12 @@ ros2-topics:
 
 rviz:
 	@echo "Launching RViz with Visual SLAM visualization..."
-	rviz2 -d $$(ros2 pkg prefix isaac_ros_visual_slam --share)/rviz/default.rviz 2>/dev/null || rviz2
+	@if [ -f ./config/thor_visual_slam.rviz ]; then \
+		rviz2 -d ./config/thor_visual_slam.rviz; \
+	else \
+		echo "Warning: Config file not found at ./config/thor_visual_slam.rviz"; \
+		rviz2; \
+	fi
 
 ros2-hz:
 	@echo "Checking image_0 rate..."

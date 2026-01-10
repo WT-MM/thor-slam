@@ -5,7 +5,7 @@ from collections import deque
 from dataclasses import dataclass, field
 from threading import Lock
 from types import TracebackType
-from typing import Self
+from typing import Self, Sequence
 
 import numpy as np
 
@@ -89,9 +89,10 @@ class CameraRig:
 
     def __init__(
         self,
-        sources: list[CameraSource],
+        sources: Sequence[CameraSource],
         queue_size: int = 30,
         rig_extrinsics: dict[str, Extrinsics] | None = None,
+        imu_extrinsics: Extrinsics | None = None,
         imu_source: str | None = None,
     ) -> None:
         """Initialize the camera rig.
@@ -101,6 +102,8 @@ class CameraRig:
             queue_size: Maximum number of frame sets to keep in each queue.
             rig_extrinsics: Optional dict mapping source names to their pose in the rig frame.
                             If not provided, identity transforms are used for all sources.
+            imu_extrinsics: Optional extrinsics of the IMU relative to the camera it's attached to.
+                            If not provided, the IMU is assumed to be at the origin of the camera frame.
             imu_source: Optional name of the camera source to use as the primary IMU.
                         If specified, IMU data will be pulled from this source.
         """
@@ -132,8 +135,13 @@ class CameraRig:
             logger.warning("No rig extrinsics provided, using identity transformation for all sources")
             rig_extrinsics = {name: Extrinsics.from_4x4_matrix(np.eye(4)) for name in self.sources}
 
+        # Build imu extrinsics (identity if not provided)
+        if not imu_extrinsics:
+            logger.warning("No imu extrinsics provided, using identity transformation for the IMU")
+            imu_extrinsics = Extrinsics.from_4x4_matrix(np.eye(4))
+
         # Build calibration
-        self._calibration = self._build_calibration(rig_extrinsics)
+        self._calibration = self._build_calibration(rig_extrinsics, imu_extrinsics)
 
     """
     Supports context manager protocol for automatic cleanup:
@@ -182,11 +190,12 @@ class CameraRig:
         """Check if the rig is running."""
         return self._running
 
-    def _build_calibration(self, rig_extrinsics: dict[str, Extrinsics]) -> RigCalibration:
+    def _build_calibration(self, rig_extrinsics: dict[str, Extrinsics], imu_extrinsics: Extrinsics) -> RigCalibration:
         """Build calibration data from all sources.
 
         Args:
             rig_extrinsics: Dict mapping source names to their pose in the rig frame.
+            imu_extrinsics: Extrinsics of the IMU relative to the camera it's attached to.
         """
         intrinsics: dict[str, list[Intrinsics]] = {}
         extrinsics: dict[str, list[Extrinsics]] = {}
@@ -199,6 +208,7 @@ class CameraRig:
             intrinsics=intrinsics,
             extrinsics=extrinsics,
             rig_extrinsics=rig_extrinsics,
+            imu_extrinsics=imu_extrinsics,
         )
 
     @property
@@ -206,11 +216,15 @@ class CameraRig:
         """Get the rig calibration data."""
         return self._calibration
 
-    def load_rig_extrinsics(self, rig_extrinsics: dict[str, Extrinsics]) -> None:
+    def load_rig_extrinsics(
+        self, rig_extrinsics: dict[str, Extrinsics], imu_extrinsics: Extrinsics | None = None
+    ) -> None:
         """Load rig extrinsics for multiple sources.
 
         Args:
             rig_extrinsics: Dict mapping source names to their pose in the rig frame.
+            imu_extrinsics: Optional extrinsics of the IMU relative to the camera it's attached to.
+                            If not provided, the existing IMU extrinsics are used.
         """
         for name in rig_extrinsics:
             if name not in self.sources:
@@ -219,7 +233,12 @@ class CameraRig:
         # Rebuild calibration with updated rig extrinsics
         new_rig_extrinsics = self._calibration.rig_extrinsics.copy()
         new_rig_extrinsics.update(rig_extrinsics)
-        self._calibration = self._build_calibration(new_rig_extrinsics)
+        if imu_extrinsics is not None:
+            new_imu_extrinsics = imu_extrinsics
+        else:
+            # Use existing IMU extrinsics or identity if None
+            new_imu_extrinsics = self._calibration.imu_extrinsics or Extrinsics.from_4x4_matrix(np.eye(4))
+        self._calibration = self._build_calibration(new_rig_extrinsics, new_imu_extrinsics)
 
     def get_rig_extrinsics(self, source_name: str) -> Extrinsics | None:
         """Get the rig extrinsics for a camera source.

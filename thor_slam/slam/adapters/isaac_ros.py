@@ -1,6 +1,6 @@
 """SLAM adapter for Isaac ROS Visual SLAM.
 
-Publishes to: /visual_slam/image_0..N, /visual_slam/camera_info_0..N
+Publishes to: /visual_slam/image_0..N, /visual_slam/camera_info_0..N, /visual_slam/imu
 Subscribes to: /visual_slam/tracking/odometry
 """
 
@@ -12,12 +12,15 @@ from dataclasses import dataclass
 
 import numpy as np
 import rclpy
+from builtin_interfaces.msg import Time
 from cv_bridge import CvBridge  # type: ignore[import-not-found]
 from geometry_msgs.msg import TransformStamped
 from nav_msgs.msg import Odometry
 from rclpy.node import Node
+from rclpy.publisher import Publisher
+from rclpy.qos import qos_profile_sensor_data
 from scipy.spatial.transform import Rotation
-from sensor_msgs.msg import CameraInfo, Image
+from sensor_msgs.msg import CameraInfo, Image, Imu
 from tf2_ros import StaticTransformBroadcaster
 
 from thor_slam.camera.rig import RigCalibration
@@ -25,6 +28,21 @@ from thor_slam.camera.types import Extrinsics, SynchronizedFrameSet
 from thor_slam.slam.interface import CameraConfig, SlamConfig, SlamEngine, SlamMap, SlamPose, TrackingState
 
 logger = logging.getLogger(__name__)
+
+# Coordinate frame transformation matrices
+# Luxonis uses RDF (Right-Down-Forward): +x right, +y down, +z forward
+# Isaac ROS base_link uses FLU (Forward-Left-Up): +x forward, +y left, +z up
+# Camera optical frames need to be RDF: +z forward, +y down, +x right
+
+# Transformation from RDF to FLU
+RDF_TO_FLU_MATRIX = np.array(
+    [
+        [0, 0, 1, 0],  # x_flu = z_rdf (forward)
+        [-1, 0, 0, 0],  # y_flu = -x_rdf (left)
+        [0, -1, 0, 0],  # z_flu = -y_rdf (up)
+        [0, 0, 0, 1],
+    ]
+)
 
 
 @dataclass
@@ -44,6 +62,7 @@ class IsaacRosAdapter(SlamEngine):
 
         # Extracted at init from RigCalibration
         self._cameras: list[CameraConfig] = []
+        self._calibration: RigCalibration | None = None
 
         # ROS
         self._node: Node | None = None
@@ -52,6 +71,7 @@ class IsaacRosAdapter(SlamEngine):
         self._spin_thread: threading.Thread | None = None
         self._image_pubs: list = []
         self._info_pubs: list = []
+        self._imu_pub: Publisher | None = None
 
         # Pose
         self._latest_pose: SlamPose | None = None
@@ -60,6 +80,7 @@ class IsaacRosAdapter(SlamEngine):
 
     def initialize(self, calibration: RigCalibration, config: SlamConfig | None = None) -> None:
         """Initialize with calibration data."""
+        self._calibration = calibration
         self._cameras = self._extract_cameras(calibration)
 
         if len(self._cameras) < self._num_cameras:
@@ -86,11 +107,17 @@ class IsaacRosAdapter(SlamEngine):
                 self._node.create_publisher(CameraInfo, f"/visual_slam/camera_info_{i}", self._config.queue_size)
             )
 
+        # Create IMU publisher with sensor QoS profile
+        self._imu_pub = self._node.create_publisher(Imu, "/visual_slam/imu", qos_profile_sensor_data)
+
         # Subscribe to odometry
         self._node.create_subscription(Odometry, "/visual_slam/tracking/odometry", self._odom_cb, 10)
 
         # Publish static TF
         self._publish_tf()
+
+        # Publish IMU link transform if IMU extrinsics are available
+        self._publish_imu_tf()
 
         # Start spin
         node = self._node
@@ -99,9 +126,13 @@ class IsaacRosAdapter(SlamEngine):
 
         self._tracking_state = TrackingState.INITIALIZING
         logger.info("Initialized with %d cameras", len(self._cameras))
+        logger.info("IMU publisher created at /visual_slam/imu")
 
     def _extract_cameras(self, cal: RigCalibration) -> list[CameraConfig]:
-        """Extract flat list of camera configs from calibration."""
+        """Extract flat list of camera configs from calibration.
+
+        Transforms extrinsics from RDF (Luxonis) to ROS/cuVSLAM coordinate frame.
+        """
         cameras: list[CameraConfig] = []
         for source_name in sorted(cal.intrinsics.keys()):
             intrinsics_list = cal.intrinsics[source_name]
@@ -113,6 +144,7 @@ class IsaacRosAdapter(SlamEngine):
                 extr = (
                     extrinsics_list[cam_idx] if cam_idx < len(extrinsics_list) else Extrinsics(np.eye(3), np.zeros(3))
                 )
+
                 cameras.append(CameraConfig(intr, extr, source_name, cam_idx))
 
         return cameras
@@ -145,6 +177,122 @@ class IsaacRosAdapter(SlamEngine):
 
         self._tf_broadcaster.sendTransform(transforms)
         logger.info("Published TF: base_link -> camera_0..%d", len(transforms) - 1)
+
+    def _publish_imu_tf(self) -> None:
+        """Publish static TF from base_link to imu_link.
+
+        The IMU transform is computed as: base_link -> camera -> imu_link
+        where camera is the camera that the IMU is attached to (typically camera_0).
+
+        Coordinate frame transformations:
+        - Camera extrinsics are already transformed to ROS frame: base_link_FLU -> camera_RDF
+        - IMU extrinsics are in camera frame: camera_RDF -> IMU_RDF
+        - Combined: base_link_FLU -> IMU_RDF
+        """
+        if not self._tf_broadcaster or not self._node or not self._calibration:
+            return
+
+        # Check if IMU extrinsics are available
+        if self._calibration.imu_extrinsics is None:
+            logger.warning("No IMU extrinsics in calibration, skipping IMU TF publication")
+            return
+
+        if not self._cameras:
+            logger.warning("No cameras available, skipping IMU TF publication")
+            return
+
+        # Find the camera that the IMU is attached to
+        # Typically this is the first camera (camera_0), which corresponds to the first camera
+        # from the first source. We use camera_0 as the IMU attachment point.
+        imu_camera_idx = 0
+        imu_camera = self._cameras[imu_camera_idx]
+
+        # Get the camera transform (base_link -> camera_0)
+        # This is already transformed to ROS frame: base_link_FLU -> camera_RDF_optical
+        camera_extrinsics = imu_camera.extrinsics
+
+        # Get IMU extrinsics (camera -> IMU)
+        # This is in the camera's coordinate frame (RDF): camera_RDF -> IMU_RDF
+        imu_extrinsics_camera_frame = self._calibration.imu_extrinsics
+
+        # Combine transforms: base_link -> camera -> IMU
+        # camera_matrix: base_link_FLU -> camera_RDF (already in ROS frame)
+        # imu_matrix_camera_frame: camera_RDF -> IMU_RDF (in camera frame)
+        # Result: base_link_FLU -> IMU_RDF
+        camera_matrix = camera_extrinsics.to_4x4_matrix()
+        imu_matrix_camera_frame = imu_extrinsics_camera_frame.to_4x4_matrix()
+        imu_matrix_base_frame = camera_matrix @ imu_matrix_camera_frame
+
+        # Convert to Extrinsics
+        imu_extrinsics_base = Extrinsics.from_4x4_matrix(imu_matrix_base_frame)
+
+        # Create transform message
+        stamp = self._node.get_clock().now().to_msg()
+        t = TransformStamped()
+        t.header.stamp = stamp
+        t.header.frame_id = "base_link"
+        t.child_frame_id = "imu_link"
+
+        # Set translation
+        t.transform.translation.x = float(imu_extrinsics_base.translation[0])
+        t.transform.translation.y = float(imu_extrinsics_base.translation[1])
+        t.transform.translation.z = float(imu_extrinsics_base.translation[2])
+
+        # Set rotation
+        q = Rotation.from_matrix(imu_extrinsics_base.rotation).as_quat()
+        t.transform.rotation.x = float(q[0])
+        t.transform.rotation.y = float(q[1])
+        t.transform.rotation.z = float(q[2])
+        t.transform.rotation.w = float(q[3])
+
+        # Publish transform
+        self._tf_broadcaster.sendTransform([t])
+        logger.info("Published TF: base_link -> imu_link")
+
+    def _publish_imu(self, sensor_data: dict, timestamp: Time) -> None:
+        """Publish IMU data to ROS topic.
+
+        Args:
+            sensor_data: Dictionary containing 'accelerometer' and 'gyroscope' keys with numpy arrays.
+            timestamp: Time message for the IMU message header.
+        """
+        if not self._node or not self._imu_pub:
+            return
+
+        # Create IMU message
+        imu_msg = Imu()
+
+        # Set header
+        imu_msg.header.stamp = timestamp
+        imu_msg.header.frame_id = "base_link"
+
+        # Extract accelerometer and gyroscope data
+        accel = sensor_data.get("accelerometer")
+        gyro = sensor_data.get("gyroscope")
+
+        if accel is not None and len(accel) >= 3:
+            # Accelerometer data in m/s²
+            # Note: IMU data from Luxonis is in RDF frame, but we need to transform it
+            # to match the camera optical frame (RDF) or base_link (FLU) as needed
+            # For now, we'll publish as-is and let the coordinate frame transformation
+            # be handled by the frame_id convention
+            imu_msg.linear_acceleration.x = float(accel[0])
+            imu_msg.linear_acceleration.y = float(accel[1])
+            imu_msg.linear_acceleration.z = float(accel[2])
+
+        if gyro is not None and len(gyro) >= 3:
+            # Gyroscope data in rad/s
+            imu_msg.angular_velocity.x = float(gyro[0])
+            imu_msg.angular_velocity.y = float(gyro[1])
+            imu_msg.angular_velocity.z = float(gyro[2])
+
+        # Set covariance matrices (unknown for now)
+        # Diagonal covariance: [x, y, z, roll, pitch, yaw]
+        # Using large values to indicate uncertainty
+        imu_msg.linear_acceleration_covariance[0] = -1.0  # Unknown
+        imu_msg.angular_velocity_covariance[0] = -1.0  # Unknown
+
+        self._imu_pub.publish(imu_msg)
 
     def _odom_cb(self, msg: Odometry) -> None:
         """Handle odometry."""
@@ -247,6 +395,20 @@ class IsaacRosAdapter(SlamEngine):
             self._info_pubs[i].publish(info)
 
             published += 1
+
+        # Publish IMU data if available
+        if frame_set.sensor_data is not None and self._imu_pub is not None:
+            # Use sensor timestamp if available, otherwise use frame timestamp
+            imu_timestamp = frame_set.sensor_timestamp
+            if imu_timestamp is not None:
+                # Convert float timestamp to Time message
+                time_msg = Time()
+                time_msg.sec = int(imu_timestamp)
+                time_msg.nanosec = int((imu_timestamp - time_msg.sec) * 1e9)
+            else:
+                # Fall back to frame timestamp
+                time_msg = stamp
+            self._publish_imu(frame_set.sensor_data, time_msg)
 
         with self._pose_lock:
             return self._latest_pose
