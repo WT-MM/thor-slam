@@ -108,8 +108,11 @@ def create_sources(cameras: list[dict], fps: int) -> tuple[list[LuxonisCameraSou
     if not common:
         raise RuntimeError("No common resolution found")
 
-    # Use smallest
-    resolution = min(common, key=lambda r: r[0] * r[1])
+    sorted_resolutions = sorted(common, key=lambda r: r[0] * r[1])
+    if len(sorted_resolutions) < 2:
+        resolution = sorted_resolutions[0]
+    else:
+        resolution = sorted_resolutions[0]  # Use smallest
     print(f"  Resolution: {resolution[0]}x{resolution[1]}")
 
     # Wait for devices to be released after detection
@@ -197,9 +200,7 @@ def run(
             # Sanity: ensure every IP produced an extrinsics
             missing_out = [ip for ip in camera_ips if ip not in rig_extrinsics]
             if missing_out:
-                raise RuntimeError(
-                    f"URDF did not contain base_link -> {missing_out} link joints (check link names)."
-                )
+                raise RuntimeError(f"URDF did not contain base_link -> {missing_out} link joints (check link names).")
             print(f"  ✓ Loaded extrinsics for {len(rig_extrinsics)} camera(s)")
 
         # Create rig
@@ -243,7 +244,7 @@ def run(
 
         last_print = time.time()
         frame_count = 0
-        last_timestamp = 0.0
+        start_time = time.time()
         actual_fps = 0.0
 
         while not _shutdown:
@@ -255,12 +256,11 @@ def run(
             pose = slam.process_frames(sync)
             frame_count += 1
 
-            # Calculate actual FPS from camera timestamps
-            if last_timestamp > 0:
-                delta = sync.timestamp - last_timestamp
-                if delta > 0:
-                    actual_fps = 1.0 / delta
-            last_timestamp = sync.timestamp
+            # Calculate actual FPS as average over elapsed time
+            # This measures the rate of synchronized frame sets being processed
+            elapsed = time.time() - start_time
+            if elapsed > 0:
+                actual_fps = frame_count / elapsed
 
             # Display
             if display:
@@ -338,7 +338,7 @@ def main() -> None:
     )
     # Default URDF path: examples/assets/brackets.urdf
     default_urdf = Path(__file__).parent.parent / "examples" / "assets" / "brackets.urdf"
-    
+
     parser.add_argument(
         "--urdf",
         type=str,
