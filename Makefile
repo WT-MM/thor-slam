@@ -63,7 +63,7 @@ isaac-ros-launch:
 		num_cameras:=$(NUM_CAMERAS) \
 		enable_slam_visualization:=true \
 		rectified_images:=false \
-		enable_imu_fusion:=true \
+		enable_imu_fusion:=false \
 		enable_landmarks_view:=true \
 		enable_observations_view:=true \
 		enable_localization_n_mapping:=true \
@@ -75,10 +75,7 @@ isaac-ros-launch:
 
 # Run the camera bridge
 slam-run:
-	python -m scripts.run_slam --camera-ips $(CAMERA) --num-cameras $(NUM_CAMERAS) --fps $(FPS) $(STEREO_FLAG)
-
-slam-run-headless:
-	python -m scripts.run_slam --camera-ips $(CAMERA) --num-cameras $(NUM_CAMERAS) --fps $(FPS) $(STEREO_FLAG)
+	python -m scripts.run_slam
 
 # ============================================ #
 #                 ROS2 Utils                   #
