@@ -334,6 +334,12 @@ def test_camera_rig(
                         # Calculate sync delta for this frame
                         frame_sync_delta = frame.timestamp - sync_set.timestamp
 
+                        if frame_count % 50 == 0:
+
+                            print(f"Frame timestamp: {frame.timestamp}")
+                            print(f"Sync set timestamp: {sync_set.timestamp}")
+                            print(f"Frame sync delta: {frame_sync_delta}")
+
                         # Prepare image for display
                         if len(frame.image.shape) == 2:
                             img = cv2.cvtColor(frame.image, cv2.COLOR_GRAY2BGR)
@@ -355,17 +361,17 @@ def test_camera_rig(
                         cv2.imshow(window_name, img)
 
                 # Print statistics periodically
-                if current_time - last_print_time >= 1.0:
-                    queue_depths = rig.get_queue_depths()
-                    avg_sync_delta = sum(sync_deltas[-30:]) / len(sync_deltas[-30:]) if sync_deltas else 0.0
-                    max_sync_delta = max(sync_deltas[-30:]) if sync_deltas else 0.0
+                # if current_time - last_print_time >= 1.0:
+                #     queue_depths = rig.get_queue_depths()
+                #     avg_sync_delta = sum(sync_deltas[-30:]) / len(sync_deltas[-30:]) if sync_deltas else 0.0
+                #     max_sync_delta = max(sync_deltas[-30:]) if sync_deltas else 0.0
 
-                    print(
-                        f"Frames: {frame_count} | "
-                        f"Sync Δ: avg={avg_sync_delta * 1000:.1f}ms, max={max_sync_delta * 1000:.1f}ms | "
-                        f"Queues: {queue_depths}"
-                    )
-                    last_print_time = current_time
+                #     print(
+                #         f"Frames: {frame_count} | "
+                #         f"Sync Δ: avg={avg_sync_delta * 1000:.1f}ms, max={max_sync_delta * 1000:.1f}ms | "
+                #         f"Queues: {queue_depths}"
+                #     )
+                #     last_print_time = current_time
 
                 # Process OpenCV events
                 cv2.waitKey(1)

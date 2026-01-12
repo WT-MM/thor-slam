@@ -276,7 +276,7 @@ class CameraRig:
                 if sensor_data is not None and sensor_data[0] is not None and sensor_data[1] is not None:
                     self._imu_queue.append((sensor_data[1], sensor_data[0]))
 
-            frames = source.try_get_latest_frames()
+            frames = source.get_latest_frames()
             if frames:
                 frame_set = FrameSet.from_frames(frames, source_name=name)
                 # if source.has_sensor_data:

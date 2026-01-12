@@ -1,0 +1,45 @@
+# SLAM Configuration
+
+cameras:
+  # Camera 1: Right cam
+  - ip: "192.168.2.21"
+    stereo: true
+    resolution: [1280, 800]
+    sensor_type: "MONO"
+  
+  # Camera 2: Left cam
+  - ip: "192.168.2.22"
+    stereo: true
+    resolution: [1280, 800]
+    sensor_type: "MONO"
+  
+  # # Camera 3: Up cam
+  # - ip: "192.168.2.23"
+  #   stereo: false
+  #   resolution: [1280, 800]
+  #   sensor_type: "COLOR"
+  
+  # Camera 4: Front low cam
+  - ip: "192.168.2.25"
+    stereo: true
+    resolution: [1280, 800]
+    sensor_type: "MONO"
+
+# Frame rate for all cameras
+fps: 30
+
+# Display camera feeds in OpenCV windows
+display: false
+
+# Path to URDF file with base_link star topology (empty string uses default)
+urdf_path: ""
+
+# IMU report rate in Hz
+imu_report_rate: 400
+
+# Camera output queue size
+queue_size: 8
+
+# Rig synchronization queue size
+rig_queue_size: 30
+

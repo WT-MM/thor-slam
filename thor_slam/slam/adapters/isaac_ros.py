@@ -291,9 +291,6 @@ class IsaacRosAdapter(SlamEngine):
 
         self._frame_count += 1
 
-        # TODO: switch this back to frame_set timestamp. Check monotonicity
-        stamp = self._node.get_clock().now().to_msg()
-
         # Map frames to global camera indices
         published = 0
         for i, cam in enumerate(self._cameras):
@@ -305,6 +302,11 @@ class IsaacRosAdapter(SlamEngine):
 
             frame = fs.frames[cam.cam_idx]
             frame_id = f"camera_{i}"
+
+            stamp = Time()
+
+            stamp.sec = int(frame.timestamp)
+            stamp.nanosec = int((frame.timestamp - int(frame.timestamp)) * 1e9)
 
             img = frame.image
             if len(img.shape) == 2:

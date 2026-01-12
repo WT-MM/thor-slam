@@ -6,29 +6,24 @@ Publishes camera frames to:
   /visual_slam/camera_info_0, /visual_slam/camera_info_1, ...
 
 Example:
-    # Single stereo camera (2 cameras)
-    python -m scripts.run_slam --camera-ips 192.168.2.21
+    # Use default config
+    python -m scripts.run_slam
 
-    # Two stereo cameras (4 cameras)
-    python -m scripts.run_slam --camera-ips 192.168.2.21,192.168.2.22 --num-cameras 4
-
-    # With URDF extrinsics (multicam)
-    python -m scripts.run_slam \
-      --camera-ips 192.168.2.21,192.168.2.22 \
-      --num-cameras 4 \
-      --urdf /path/to/rig.urdf
+    # Use custom config
+    python -m scripts.run_slam --config /path/to/config.yaml
 """
 
-import argparse
 import logging
 import signal
 import sys
 import time
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import cv2
-import depthai as dai
 import numpy as np
+import yaml
 
 from thor_slam.camera.drivers.luxonis import (
     LuxonisCameraConfig,
@@ -36,30 +31,15 @@ from thor_slam.camera.drivers.luxonis import (
     LuxonisResolution,
 )
 from thor_slam.camera.rig import CameraRig
-from thor_slam.camera.types import Extrinsics, IMUExtrinsics, IPv4
-from thor_slam.camera.utils import (
-    get_luxonis_camera_valid_modes,
-    get_luxonis_camera_valid_resolutions,
-    get_luxonis_device,
-    load_rig_extrinsics_from_urdf,
-)
+from thor_slam.camera.types import Extrinsics, IMUExtrinsics
+from thor_slam.camera.utils import load_rig_extrinsics_from_urdf
 from thor_slam.slam import IsaacRosAdapter
 
 # Shutdown flag
 _shutdown = False
 
-
-def signal_handler(sig: int, frame: object) -> None:
-    """Handle shutdown signal."""
-    global _shutdown
-    _shutdown = True
-    print("\nShutting down...")
-
-
-def parse_ips(value: str) -> list[str]:
-    """Parse comma-separated IPs."""
-    return [ip.strip() for ip in value.split(",") if ip.strip()]
-
+# Default config path
+DEFAULT_CONFIG_PATH = Path(__file__).parent.parent / "config" / "slam_config.yaml"
 
 # Fixed camera mapping: IP address -> URDF link name
 CAMERA_MAP = {
@@ -70,133 +50,146 @@ CAMERA_MAP = {
 }
 
 
-def detect_cameras(ips: list[str]) -> list[dict]:
-    """Detect camera capabilities."""
-    cameras = []
-    for ip in ips:
-        print(f"  Checking {ip}...")
-        device = get_luxonis_device(IPv4(ip))
-        if device is None:
-            raise RuntimeError(f"Cannot connect to {ip}")
+@dataclass
+class CameraConfig:
+    """Configuration for a single camera."""
 
-        # Get valid resolutions for stereo cameras
-        resolutions = get_luxonis_camera_valid_resolutions(device, dai.CameraBoardSocket.CAM_A)
-        modes = get_luxonis_camera_valid_modes(device, dai.CameraBoardSocket.CAM_A)
-        has_mono = dai.CameraSensorType.MONO in modes
-        device.close()
+    ip: str
+    stereo: bool
+    resolution: tuple[int, int]  # (width, height)
+    sensor_type: str  # "COLOR" or "MONO"
 
-        cameras.append(
-            {
-                "ip": ip,
-                "resolutions": resolutions,
-                "mono": has_mono,
-            }
+
+@dataclass
+class SlamConfig:
+    """SLAM configuration."""
+
+    cameras: list[CameraConfig]
+    fps: int = 30
+    display: bool = False
+    urdf_path: str = ""
+    imu_report_rate: int = 400
+    queue_size: int = 8
+    rig_queue_size: int = 30
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "SlamConfig":
+        """Create config from dictionary."""
+        cameras = []
+        for cam_data in data.get("cameras", []):
+            resolution = cam_data.get("resolution", [1280, 800])
+            cameras.append(
+                CameraConfig(
+                    ip=cam_data["ip"],
+                    stereo=cam_data.get("stereo", True),
+                    resolution=(resolution[0], resolution[1]),
+                    sensor_type=cam_data.get("sensor_type", "COLOR").upper(),
+                )
+            )
+
+        # Default URDF path
+        urdf_path = data.get("urdf_path", "")
+        if not urdf_path:
+            default_urdf = Path(__file__).parent.parent / "examples" / "assets" / "brackets.urdf"
+            if default_urdf.exists():
+                urdf_path = str(default_urdf)
+
+        return cls(
+            cameras=cameras,
+            fps=data.get("fps", 30),
+            display=data.get("display", False),
+            urdf_path=urdf_path,
+            imu_report_rate=data.get("imu_report_rate", 400),
+            queue_size=data.get("queue_size", 8),
+            rig_queue_size=data.get("rig_queue_size", 30),
         )
-        print(f" Valid resolutions: {resolutions}")
-        print(f" Valid modes: {modes}")
-        print(f" Has mono: {has_mono}")
-        # print(f"    ✓ {len(resolutions)} resolutions, {'MONO' if has_mono else 'COLOR'}")
 
-    return cameras
+    def calculate_num_cameras(self) -> int:
+        """Calculate total number of camera streams (stereo=2, mono=1 per camera)."""
+        return sum(2 if cam.stereo else 1 for cam in self.cameras)
 
 
-def create_sources(cameras: list[dict], fps: int, stereo: bool = True) -> tuple[dict[str, LuxonisCameraSource], str | None]:
-    """Create camera sources with largest common resolution."""
-    # If stereo is False, force resolution to (1280, 800) and use COLOR
-    if not stereo:
-        resolution = (1280, 800)
-        camera_mode = "COLOR"
-        print(f"  Resolution: {resolution[0]}x{resolution[1]} (forced for mono mode)")
-    else:
-        # Find common resolutions
-        common = set(cameras[0]["resolutions"])
-        for cam in cameras[1:]:
-            common &= set(cam["resolutions"])
+def signal_handler(sig: int, frame: object) -> None:
+    """Handle shutdown signal."""
+    global _shutdown
+    _shutdown = True
+    print("\nShutting down...")
 
-        if not common:
-            raise RuntimeError("No common resolution found")
 
-        sorted_resolutions = sorted(common, key=lambda r: r[0] * r[1])
-        if len(sorted_resolutions) < 2:
-            resolution = sorted_resolutions[0]
-        else:
-            resolution = sorted_resolutions[0]  # Use smallest
-        print(f"  Resolution: {resolution[0]}x{resolution[1]}")
+def load_config(config_path: Path) -> SlamConfig:
+    """Load configuration from YAML file."""
+    if not config_path.exists():
+        raise FileNotFoundError(f"Config file not found: {config_path}")
 
-        # Determine camera mode based on capabilities
-        camera_mode = "MONO" if cameras[0]["mono"] else "COLOR"
+    with open(config_path, "r") as f:
+        data = yaml.safe_load(f)
 
-    # Wait for devices to be released after detection
-    time.sleep(5.0)
+    return SlamConfig.from_dict(data)
+
+
+def create_sources(config: SlamConfig) -> tuple[dict[str, LuxonisCameraSource], str | None]:
+    """Create camera sources directly from configuration."""
+    print("\nCreating camera sources...")
 
     sources = {}
-    first_ip = cameras[0]["ip"] if cameras else None
-    for cam in cameras:
-        config = LuxonisCameraConfig(
-            ip=cam["ip"],
-            stereo=stereo,
-            resolution=LuxonisResolution.from_dimensions(resolution[0], resolution[1]),
-            fps=fps,
-            queue_size=8,
+    first_ip = config.cameras[0].ip if config.cameras else None
+
+    for cam_config in config.cameras:
+        # Create camera config directly from config values
+        luxonis_config = LuxonisCameraConfig(
+            ip=cam_config.ip,
+            stereo=cam_config.stereo,
+            resolution=LuxonisResolution.from_dimensions(cam_config.resolution[0], cam_config.resolution[1]),
+            fps=config.fps,
+            queue_size=config.queue_size,
             queue_blocking=False,
-            camera_mode=camera_mode,
-            read_imu=(cam["ip"] == first_ip),  # Enable IMU on first camera
-            imu_report_rate=400,
+            camera_mode=cam_config.sensor_type,
+            read_imu=(cam_config.ip == first_ip),  # Enable IMU on first camera
+            imu_report_rate=config.imu_report_rate,
         )
-        source = LuxonisCameraSource(config)
-        sources[cam["ip"]] = source
-        imu_status = " (IMU enabled)" if cam["ip"] == first_ip else ""
-        print(f"  ✓ {cam['ip']}{imu_status}")
+
+        source = LuxonisCameraSource(luxonis_config)
+        sources[cam_config.ip] = source
+
+        imu_status = " (IMU enabled)" if cam_config.ip == first_ip else ""
+        stereo_status = "stereo" if cam_config.stereo else "mono"
+        print(f"  ✓ {cam_config.ip}: {stereo_status}, {cam_config.resolution[0]}x{cam_config.resolution[1]}, {cam_config.sensor_type}{imu_status}")
 
     return sources, first_ip
 
 
-def run(
-    camera_ips: list[str],
-    num_cameras: int,
-    fps: int,
-    display: bool,
-    urdf_path: str = "",
-    stereo: bool = True,
-) -> None:
+def run(config: SlamConfig) -> None:
     """Run SLAM pipeline.
 
     Args:
-        camera_ips: List of camera IP addresses.
-        num_cameras: Number of cameras (total, including left/right for stereo).
-        fps: Frame rate.
-        display: Whether to display camera feeds.
-        urdf_path: Optional path to URDF file with base_link star topology.
-        stereo: Whether to enable stereo mode.
+        config: SLAM configuration.
     """
+    num_cameras = config.calculate_num_cameras()
+
     print("\n" + "=" * 60)
     print("Thor SLAM -> Isaac ROS Visual SLAM")
     print("=" * 60)
-    print(f"Cameras: {num_cameras}")
-    print(f"IPs: {', '.join(camera_ips)}")
-    print(f"FPS: {fps}")
-    print(f"Stereo: {stereo}")
-    if urdf_path:
-        print(f"URDF: {urdf_path}")
+    print(f"Total camera streams: {num_cameras}")
+    print(f"Physical cameras: {len(config.cameras)}")
+    for i, cam in enumerate(config.cameras):
+        stereo_str = "stereo" if cam.stereo else "mono"
+        print(f"  Camera {i+1}: {cam.ip} ({stereo_str}, {cam.resolution[0]}x{cam.resolution[1]}, {cam.sensor_type})")
+    print(f"FPS: {config.fps}")
+    if config.urdf_path:
+        print(f"URDF: {config.urdf_path}")
     print(f"{'=' * 60}\n")
 
     rig = None
     slam = None
 
     try:
-        # Detect cameras
-        print("Detecting cameras...")
-        cameras = detect_cameras(camera_ips)
-
-        time.sleep(5.0)
-
         # Create sources
-        print("\nCreating camera sources...")
-        sources, first_ip = create_sources(cameras, fps, stereo=stereo)
+        sources, first_ip = create_sources(config)
 
         # Load rig extrinsics from URDF if provided
         rig_extrinsics = None
-        if urdf_path:
+        if config.urdf_path:
+            camera_ips = [cam.ip for cam in config.cameras]
             # Build camera map for requested IPs only
             cam_map = {ip: CAMERA_MAP[ip] for ip in camera_ips if ip in CAMERA_MAP}
 
@@ -209,7 +202,7 @@ def run(
                 )
 
             print("\nLoading rig extrinsics from URDF...")
-            rig_extrinsics = load_rig_extrinsics_from_urdf(urdf_path, cam_map)
+            rig_extrinsics = load_rig_extrinsics_from_urdf(config.urdf_path, cam_map)
 
             # Sanity: ensure every IP produced an extrinsics
             missing_out = [ip for ip in camera_ips if ip not in rig_extrinsics]
@@ -243,9 +236,12 @@ def run(
 
         imu_to_source_extrinsics_rdf = drb_to_rdf_matrix @ imu_to_source_extrinsics.to_4x4_matrix()
 
-        world_to_source_matrix = rig_extrinsics.get(first_ip, Extrinsics.from_4x4_matrix(np.eye(4))).to_4x4_matrix()
-        world_to_imu_matrix = world_to_source_matrix @ imu_to_source_extrinsics_rdf
-        imu_extrinsics_world = Extrinsics.from_4x4_matrix(world_to_imu_matrix)
+        if rig_extrinsics:
+            world_to_source_matrix = rig_extrinsics.get(first_ip, Extrinsics.from_4x4_matrix(np.eye(4))).to_4x4_matrix()
+            world_to_imu_matrix = world_to_source_matrix @ imu_to_source_extrinsics_rdf
+            imu_extrinsics_world = Extrinsics.from_4x4_matrix(world_to_imu_matrix)
+        else:
+            imu_extrinsics_world = Extrinsics.from_4x4_matrix(imu_to_source_extrinsics_rdf)
 
         print(f"  ✓ Computed IMU extrinsics in world frame for {first_ip}")
 
@@ -256,7 +252,7 @@ def run(
 
         rig = CameraRig(
             sources=sources.values(),
-            queue_size=30,
+            queue_size=config.rig_queue_size,
             rig_extrinsics=rig_extrinsics,
             imu_source=first_ip,
             imu_extrinsics=imu_extrinsics_obj,
@@ -299,7 +295,7 @@ def run(
                 actual_fps = frame_count / elapsed
 
             # Display
-            if display:
+            if config.display:
                 for source_name, fs in sync.frame_sets.items():
                     for i, frame in enumerate(fs.frames):
                         img = frame.image
@@ -332,7 +328,7 @@ def run(
         pass
     finally:
         print("\nShutting down...")
-        if display:
+        if config.display:
             cv2.destroyAllWindows()
         if slam:
             slam.shutdown()
@@ -343,6 +339,8 @@ def run(
 
 def main() -> None:
     """Entry point."""
+    import argparse
+
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
 
@@ -350,60 +348,48 @@ def main() -> None:
 
     parser = argparse.ArgumentParser(description="Run SLAM with Isaac ROS Visual SLAM")
     parser.add_argument(
-        "--camera-ips",
+        "--config",
         type=str,
-        required=True,
-        help="Camera IP(s), comma-separated",
-    )
-    parser.add_argument(
-        "--num-cameras",
-        type=int,
-        default=2,
-        help="Number of cameras (default: 2 for stereo)",
-    )
-    parser.add_argument(
-        "--fps",
-        type=int,
-        default=10,
-        help="Frame rate (default: 10)",
-    )
-    parser.add_argument(
-        "--display",
-        action=argparse.BooleanOptionalAction,
-        default=False,
-        help="Show camera feeds (use --no-display to disable).",
-    )
-    # Default URDF path: examples/assets/brackets.urdf
-    default_urdf = Path(__file__).parent.parent / "examples" / "assets" / "brackets.urdf"
-
-    parser.add_argument(
-        "--urdf",
-        type=str,
-        default=str(default_urdf),
-        help=f"Path to URDF with base_link star topology (default: {default_urdf})",
-    )
-    parser.add_argument(
-        "--stereo",
-        action=argparse.BooleanOptionalAction,
-        default=True,
-        help="Enable stereo (use --no-stereo to disable).",
+        default=str(DEFAULT_CONFIG_PATH),
+        help=f"Path to config YAML file (default: {DEFAULT_CONFIG_PATH})",
     )
 
     args = parser.parse_args()
-    ips = parse_ips(args.camera_ips)
+    config_path = Path(args.config)
 
-    if not ips:
-        print("Error: No camera IPs provided")
+    try:
+        config = load_config(config_path)
+    except FileNotFoundError as e:
+        print(f"Error: {e}")
+        print(f"\nExample config structure:")
+        print(yaml.dump(
+            {
+                "cameras": [
+                    {
+                        "ip": "192.168.2.21",
+                        "stereo": True,
+                        "resolution": [1280, 800],
+                        "sensor_type": "COLOR"
+                    }
+                ],
+                "fps": 30,
+                "display": False,
+                "urdf_path": "",
+                "imu_report_rate": 400
+            },
+            default_flow_style=False,
+            sort_keys=False
+        ))
+        sys.exit(1)
+    except Exception as e:
+        print(f"Error loading config: {e}")
         sys.exit(1)
 
-    run(
-        ips,
-        args.num_cameras,
-        args.fps,
-        args.display,
-        urdf_path=args.urdf,
-        stereo=args.stereo,
-    )
+    if not config.cameras:
+        print("Error: No cameras specified in config")
+        sys.exit(1)
+
+    run(config)
 
 
 if __name__ == "__main__":
