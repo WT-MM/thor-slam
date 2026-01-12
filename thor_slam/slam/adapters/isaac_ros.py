@@ -10,6 +10,7 @@ import logging
 import threading
 from dataclasses import dataclass
 
+import cv2
 import numpy as np
 import rclpy
 from builtin_interfaces.msg import Time
@@ -33,6 +34,9 @@ logger = logging.getLogger(__name__)
 # Luxonis uses RDF (Right-Down-Forward): +x right, +y down, +z forward
 # Isaac ROS base_link uses FLU (Forward-Left-Up): +x forward, +y left, +z up
 # Camera optical frames need to be RDF: +z forward, +y down, +x right
+
+# OAK-D Pro IMU uses ULB (Up-Left-Back)
+# OAK-D Long Range IMU uses RDF (Right-Down-Forward)
 
 # Transformation from RDF to FLU
 RDF_TO_FLU_MATRIX = np.array(
@@ -117,7 +121,10 @@ class IsaacRosAdapter(SlamEngine):
         self._publish_tf()
 
         # Publish IMU link transform if IMU extrinsics are available
-        self._publish_imu_tf()
+        if self._calibration.imu_extrinsics is not None:
+            self._publish_imu_tf()
+        else:
+            logger.warning("No IMU extrinsics in calibration, skipping IMU TF publication")
 
         # Start spin
         node = self._node
@@ -179,52 +186,16 @@ class IsaacRosAdapter(SlamEngine):
         logger.info("Published TF: base_link -> camera_0..%d", len(transforms) - 1)
 
     def _publish_imu_tf(self) -> None:
-        """Publish static TF from base_link to imu_link.
-
-        The IMU transform is computed as: base_link -> camera -> imu_link
-        where camera is the camera that the IMU is attached to (typically camera_0).
-
-        Coordinate frame transformations:
-        - Camera extrinsics are already transformed to ROS frame: base_link_FLU -> camera_RDF
-        - IMU extrinsics are in camera frame: camera_RDF -> IMU_RDF
-        - Combined: base_link_FLU -> IMU_RDF
-        """
+        """Publish static TF from base_link to imu_link."""
         if not self._tf_broadcaster or not self._node or not self._calibration:
             return
 
-        # Check if IMU extrinsics are available
         if self._calibration.imu_extrinsics is None:
             logger.warning("No IMU extrinsics in calibration, skipping IMU TF publication")
             return
 
-        if not self._cameras:
-            logger.warning("No cameras available, skipping IMU TF publication")
-            return
-
-        # Find the camera that the IMU is attached to
-        # Typically this is the first camera (camera_0), which corresponds to the first camera
-        # from the first source. We use camera_0 as the IMU attachment point.
-        imu_camera_idx = 0
-        imu_camera = self._cameras[imu_camera_idx]
-
-        # Get the camera transform (base_link -> camera_0)
-        # This is already transformed to ROS frame: base_link_FLU -> camera_RDF_optical
-        camera_extrinsics = imu_camera.extrinsics
-
-        # Get IMU extrinsics (camera -> IMU)
-        # This is in the camera's coordinate frame (RDF): camera_RDF -> IMU_RDF
-        imu_extrinsics_camera_frame = self._calibration.imu_extrinsics
-
-        # Combine transforms: base_link -> camera -> IMU
-        # camera_matrix: base_link_FLU -> camera_RDF (already in ROS frame)
-        # imu_matrix_camera_frame: camera_RDF -> IMU_RDF (in camera frame)
-        # Result: base_link_FLU -> IMU_RDF
-        camera_matrix = camera_extrinsics.to_4x4_matrix()
-        imu_matrix_camera_frame = imu_extrinsics_camera_frame.to_4x4_matrix()
-        imu_matrix_base_frame = camera_matrix @ imu_matrix_camera_frame
-
-        # Convert to Extrinsics
-        imu_extrinsics_base = Extrinsics.from_4x4_matrix(imu_matrix_base_frame)
+        # Get IMU extrinsics (already in base_link/world frame)
+        imu_extrinsics = self._calibration.imu_extrinsics.extrinsics
 
         # Create transform message
         stamp = self._node.get_clock().now().to_msg()
@@ -234,12 +205,12 @@ class IsaacRosAdapter(SlamEngine):
         t.child_frame_id = "imu_link"
 
         # Set translation
-        t.transform.translation.x = float(imu_extrinsics_base.translation[0])
-        t.transform.translation.y = float(imu_extrinsics_base.translation[1])
-        t.transform.translation.z = float(imu_extrinsics_base.translation[2])
+        t.transform.translation.x = float(imu_extrinsics.translation[0])
+        t.transform.translation.y = float(imu_extrinsics.translation[1])
+        t.transform.translation.z = float(imu_extrinsics.translation[2])
 
         # Set rotation
-        q = Rotation.from_matrix(imu_extrinsics_base.rotation).as_quat()
+        q = Rotation.from_matrix(imu_extrinsics.rotation).as_quat()
         t.transform.rotation.x = float(q[0])
         t.transform.rotation.y = float(q[1])
         t.transform.rotation.z = float(q[2])
@@ -339,7 +310,10 @@ class IsaacRosAdapter(SlamEngine):
             if len(img.shape) == 2:
                 img_msg = self._bridge.cv2_to_imgmsg(img, encoding="mono8")
             else:
-                img_msg = self._bridge.cv2_to_imgmsg(img, encoding="bgr8")
+                # Convert BGR to RGB for Isaac ROS (expects rgb8, not bgr8)
+                # NOTE: Have image encoding information somewhere  within the frameset.
+                img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+                img_msg = self._bridge.cv2_to_imgmsg(img_rgb, encoding="rgb8")
 
             img_msg.header.stamp = stamp
             img_msg.header.frame_id = frame_id

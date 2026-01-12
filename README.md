@@ -71,8 +71,8 @@ Luxonis cameras use the following coordinate convention:
 However the IMU convention is dependent on camera model.
 
 The OAK D Pro uses the following:
-- X up
-- Y left
+- X down
+- Y right
 - Z back
 
 The Oak D Long Range uses:

@@ -16,6 +16,7 @@ def generate_launch_description():
     enable_observations_view = LaunchConfiguration('enable_observations_view')
     enable_localization_n_mapping = LaunchConfiguration('enable_localization_n_mapping')
     enable_debug_mode = LaunchConfiguration('enable_debug_mode')
+    image_jitter_threshold_ms = LaunchConfiguration('image_jitter_threshold_ms')
 
     visual_slam_node = ComposableNode(
         name='visual_slam_node',
@@ -31,6 +32,7 @@ def generate_launch_description():
             'enable_observations_view': enable_observations_view,
             'enable_localization_n_mapping': enable_localization_n_mapping,
             'enable_debug_mode': enable_debug_mode,
+            'image_jitter_threshold_ms': image_jitter_threshold_ms,
         }],
     )
 
@@ -53,5 +55,6 @@ def generate_launch_description():
         DeclareLaunchArgument('enable_observations_view', default_value='True'),
         DeclareLaunchArgument('enable_localization_n_mapping', default_value='True'),
         DeclareLaunchArgument('enable_debug_mode', default_value='True'),
+        DeclareLaunchArgument('image_jitter_threshold_ms', default_value='60.0'),
         container
     ])

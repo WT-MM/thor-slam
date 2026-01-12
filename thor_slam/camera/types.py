@@ -70,6 +70,18 @@ class Extrinsics:
 
 
 @dataclass
+class IMUExtrinsics:
+    """Dataclass to hold the IMU extrinsics and source name."""
+
+    source_name: str
+    extrinsics: Extrinsics
+
+    def to_4x4_matrix(self) -> np.ndarray:
+        """Convert IMUExtrinsics to a 4x4 homogeneous transformation matrix."""
+        return self.extrinsics.to_4x4_matrix()
+
+
+@dataclass
 class CameraFrame:
     """Standardized output format."""
 
@@ -159,6 +171,18 @@ class CameraSource(ABC):
         pass
 
     @abstractmethod
+    def get_sensor_extrinsics(self) -> Extrinsics | None:
+        """Get the extrinsics of a non-camera sensor relative to the CameraSource's reference frame.
+
+        This method is for non-camera sensors (e.g., IMU). For camera sensors, use get_extrinsics().
+
+        Returns:
+            Extrinsics transformation from the sensor to the CameraSource's reference frame,
+            or None if not available.
+        """
+        pass
+
+    @abstractmethod
     def get_timestamped_sensor_data(self) -> tuple[dict | None, float | None]:
         """Get the (optional) sensor data of the camera source. E.g. imu data."""
         pass
@@ -184,7 +208,6 @@ class CameraSource(ABC):
     def has_sensor_data(self) -> bool:
         """Check if the camera source has sensor data."""
         pass
-
 
 @dataclass
 class FrameSet:
