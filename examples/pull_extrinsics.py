@@ -5,11 +5,14 @@ from thor_slam.camera.rig import CameraRig
 from thor_slam.camera.utils import load_rig_extrinsics_from_urdf
 
 camera_map = {
-    "192.168.2.21": "link_oak-d-pro_bracket_1",  # Right cam
-    "192.168.2.22": "link_oak-d-pro_bracket_2",  # Left cam
-    "192.168.2.23": "link_back_high_bracket_1",  # Up cam
-    "192.168.2.25": "link_oak-d-pro_bracket_3",  # Front low cam
+    "192.168.2.25": "link_Camera_1_centroid",  # Front low cam
+    "192.168.2.21": "link_Camera_2_centroid",  # Right cam
+    "192.168.2.23": "link_Camera_3_centroid",  # Up cam
+    "192.168.2.22": "link_Camera_4_centroid",  # Left cam
 }
+
+# Front, right, top, left
+# camera1 = front, camera2 = right, camera3 = top, camera4 = left
 
 urdf_path = Path(__file__).parent / "assets" / "brackets.urdf"
 

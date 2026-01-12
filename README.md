@@ -51,6 +51,7 @@ follow the isaac ros getting started [guide](https://nvidia-isaac-ros.github.io/
 
 then follow the vslam specific [guide](https://nvidia-isaac-ros.github.io/repositories_and_packages/isaac_ros_visual_slam/isaac_ros_visual_slam/index.html#quickstart)
 
+
 then run `isaac-ros activate` to enter the isaac ros environment 
 
 and run `make isaac-ros-launch` to launch the isaac ros visual slam node
@@ -112,3 +113,5 @@ point_in_flu = rdf_to_flu_matrix @ point_in_rdf
 print(point_in_flu)
 
 ```
+
+Download from `sudo apt-get install -y ros-jazzy-isaac-ros-visual-slam`

@@ -11,6 +11,12 @@ Example:
 
     # Two stereo cameras (4 cameras)
     python -m scripts.run_slam --camera-ips 192.168.2.21,192.168.2.22 --num-cameras 4
+
+    # With URDF extrinsics (multicam)
+    python -m scripts.run_slam \
+      --camera-ips 192.168.2.21,192.168.2.22 \
+      --num-cameras 4 \
+      --urdf /path/to/rig.urdf
 """
 
 import argparse
@@ -18,6 +24,7 @@ import logging
 import signal
 import sys
 import time
+from pathlib import Path
 
 import cv2
 import depthai as dai
@@ -34,6 +41,7 @@ from thor_slam.camera.utils import (
     get_luxonis_camera_valid_modes,
     get_luxonis_camera_valid_resolutions,
     get_luxonis_device,
+    load_rig_extrinsics_from_urdf,
 )
 from thor_slam.slam import IsaacRosAdapter
 
@@ -51,6 +59,16 @@ def signal_handler(sig: int, frame: object) -> None:
 def parse_ips(value: str) -> list[str]:
     """Parse comma-separated IPs."""
     return [ip.strip() for ip in value.split(",") if ip.strip()]
+
+
+# Fixed camera mapping: IP address -> URDF link name
+# Per DEVICE/IP, not per left/right camera
+CAMERA_MAP = {
+    "192.168.2.25": "link_Camera_1_centroid",  # Front low cam
+    "192.168.2.21": "link_Camera_2_centroid",  # Right cam
+    "192.168.2.23": "link_Camera_3_centroid",  # Up cam
+    "192.168.2.22": "link_Camera_4_centroid",  # Left cam
+}
 
 
 def detect_cameras(ips: list[str]) -> list[dict]:
@@ -90,8 +108,11 @@ def create_sources(cameras: list[dict], fps: int) -> tuple[list[LuxonisCameraSou
     if not common:
         raise RuntimeError("No common resolution found")
 
-    # Use largest
-    resolution = max(common, key=lambda r: r[0] * r[1])
+    sorted_resolutions = sorted(common, key=lambda r: r[0] * r[1])
+    if len(sorted_resolutions) < 2:
+        resolution = sorted_resolutions[0]
+    else:
+        resolution = sorted_resolutions[0]  # Use smallest
     print(f"  Resolution: {resolution[0]}x{resolution[1]}")
 
     # Wait for devices to be released after detection
@@ -119,14 +140,30 @@ def create_sources(cameras: list[dict], fps: int) -> tuple[list[LuxonisCameraSou
     return sources, first_ip
 
 
-def run(camera_ips: list[str], num_cameras: int, fps: int, display: bool) -> None:
-    """Run SLAM pipeline."""
+def run(
+    camera_ips: list[str],
+    num_cameras: int,
+    fps: int,
+    display: bool,
+    urdf_path: str = "",
+) -> None:
+    """Run SLAM pipeline.
+
+    Args:
+        camera_ips: List of camera IP addresses.
+        num_cameras: Number of cameras (total, including left/right for stereo).
+        fps: Frame rate.
+        display: Whether to display camera feeds.
+        urdf_path: Optional path to URDF file with base_link star topology.
+    """
     print("\n" + "=" * 60)
     print("Thor SLAM -> Isaac ROS Visual SLAM")
     print("=" * 60)
     print(f"Cameras: {num_cameras}")
     print(f"IPs: {', '.join(camera_ips)}")
     print(f"FPS: {fps}")
+    if urdf_path:
+        print(f"URDF: {urdf_path}")
     print(f"{'=' * 60}\n")
 
     rig = None
@@ -143,21 +180,51 @@ def run(camera_ips: list[str], num_cameras: int, fps: int, display: bool) -> Non
         print("\nCreating camera sources...")
         sources, first_ip = create_sources(cameras, fps)
 
+        # Load rig extrinsics from URDF if provided
+        rig_extrinsics = None
+        if urdf_path:
+            # Build camera map for requested IPs only
+            cam_map = {ip: CAMERA_MAP[ip] for ip in camera_ips if ip in CAMERA_MAP}
+
+            # Check if all requested IPs have mappings
+            missing = [ip for ip in camera_ips if ip not in CAMERA_MAP]
+            if missing:
+                raise RuntimeError(
+                    f"These IPs are not in the fixed camera mapping: {missing}\n"
+                    f"Available IPs: {list(CAMERA_MAP.keys())}"
+                )
+
+            print("\nLoading rig extrinsics from URDF...")
+            rig_extrinsics = load_rig_extrinsics_from_urdf(urdf_path, cam_map)
+
+            # Sanity: ensure every IP produced an extrinsics
+            missing_out = [ip for ip in camera_ips if ip not in rig_extrinsics]
+            if missing_out:
+                raise RuntimeError(f"URDF did not contain base_link -> {missing_out} link joints (check link names).")
+            print(f"  ✓ Loaded extrinsics for {len(rig_extrinsics)} camera(s)")
+
         # Create rig
         print("\nStarting camera rig...")
 
+        # Fix IMU extrinsics: last row must be [0, 0, 0, 1] for valid homogeneous transform
         imu_extrinsics = Extrinsics.from_4x4_matrix(
             np.array(
                 [
                     [0, 0, -1, 0],
                     [0, 1, 0, 0],
                     [1, 0, 0, 0],
-                    [1, 0, 0, 1],
+                    [0, 0, 0, 1],  # Fixed: was [1, 0, 0, 1]
                 ]
             )
         )
         # Use first camera as IMU source (name is the IP address)
-        rig = CameraRig(sources=sources, queue_size=30, imu_source=first_ip, imu_extrinsics=imu_extrinsics)
+        rig = CameraRig(
+            sources=sources,
+            queue_size=30,
+            rig_extrinsics=rig_extrinsics,
+            imu_source=first_ip,
+            imu_extrinsics=imu_extrinsics,
+        )
         rig.start()
         print("  ✓ Rig started")
         if first_ip:
@@ -177,7 +244,7 @@ def run(camera_ips: list[str], num_cameras: int, fps: int, display: bool) -> Non
 
         last_print = time.time()
         frame_count = 0
-        last_timestamp = 0.0
+        start_time = time.time()
         actual_fps = 0.0
 
         while not _shutdown:
@@ -189,12 +256,11 @@ def run(camera_ips: list[str], num_cameras: int, fps: int, display: bool) -> Non
             pose = slam.process_frames(sync)
             frame_count += 1
 
-            # Calculate actual FPS from camera timestamps
-            if last_timestamp > 0:
-                delta = sync.timestamp - last_timestamp
-                if delta > 0:
-                    actual_fps = 1.0 / delta
-            last_timestamp = sync.timestamp
+            # Calculate actual FPS as average over elapsed time
+            # This measures the rate of synchronized frame sets being processed
+            elapsed = time.time() - start_time
+            if elapsed > 0:
+                actual_fps = frame_count / elapsed
 
             # Display
             if display:
@@ -266,9 +332,18 @@ def main() -> None:
         help="Frame rate (default: 10)",
     )
     parser.add_argument(
-        "--no-display",
+        "--display",
         action="store_true",
-        help="Disable display",
+        help="Display camera feeds (default: False)",
+    )
+    # Default URDF path: examples/assets/brackets.urdf
+    default_urdf = Path(__file__).parent.parent / "examples" / "assets" / "brackets.urdf"
+
+    parser.add_argument(
+        "--urdf",
+        type=str,
+        default=str(default_urdf),
+        help=f"Path to URDF with base_link star topology (default: {default_urdf})",
     )
 
     args = parser.parse_args()
@@ -278,7 +353,13 @@ def main() -> None:
         print("Error: No camera IPs provided")
         sys.exit(1)
 
-    run(ips, args.num_cameras, args.fps, not args.no_display)
+    run(
+        ips,
+        args.num_cameras,
+        args.fps,
+        args.display,
+        urdf_path=args.urdf,
+    )
 
 
 if __name__ == "__main__":
