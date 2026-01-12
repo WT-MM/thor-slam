@@ -39,6 +39,15 @@ CAMERA ?= 192.168.2.21
 # FPS
 FPS ?= 30
 
+STEREO ?= true
+
+STEREO_FLAG :=
+ifeq ($(STEREO),true)
+  STEREO_FLAG := --stereo
+else
+  STEREO_FLAG := --no-stereo
+endif
+
 # ============================================ #
 #              Isaac ROS Launch                #
 # ============================================ #
@@ -66,10 +75,10 @@ isaac-ros-launch:
 
 # Run the camera bridge
 slam-run:
-	python -m scripts.run_slam --camera-ips $(CAMERA) --num-cameras $(NUM_CAMERAS) --fps $(FPS)
+	python -m scripts.run_slam --camera-ips $(CAMERA) --num-cameras $(NUM_CAMERAS) --fps $(FPS) $(STEREO_FLAG)
 
 slam-run-headless:
-	python -m scripts.run_slam --camera-ips $(CAMERA) --num-cameras $(NUM_CAMERAS) --fps $(FPS) --no-display
+	python -m scripts.run_slam --camera-ips $(CAMERA) --num-cameras $(NUM_CAMERAS) --fps $(FPS) $(STEREO_FLAG)
 
 # ============================================ #
 #                 ROS2 Utils                   #

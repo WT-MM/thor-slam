@@ -36,7 +36,7 @@ from thor_slam.camera.drivers.luxonis import (
     LuxonisResolution,
 )
 from thor_slam.camera.rig import CameraRig
-from thor_slam.camera.types import Extrinsics, IPv4
+from thor_slam.camera.types import Extrinsics, IMUExtrinsics, IPv4
 from thor_slam.camera.utils import (
     get_luxonis_camera_valid_modes,
     get_luxonis_camera_valid_resolutions,
@@ -62,7 +62,6 @@ def parse_ips(value: str) -> list[str]:
 
 
 # Fixed camera mapping: IP address -> URDF link name
-# Per DEVICE/IP, not per left/right camera
 CAMERA_MAP = {
     "192.168.2.25": "link_Camera_1_centroid",  # Front low cam
     "192.168.2.21": "link_Camera_2_centroid",  # Right cam
@@ -81,8 +80,8 @@ def detect_cameras(ips: list[str]) -> list[dict]:
             raise RuntimeError(f"Cannot connect to {ip}")
 
         # Get valid resolutions for stereo cameras
-        resolutions = get_luxonis_camera_valid_resolutions(device, dai.CameraBoardSocket.CAM_B)
-        modes = get_luxonis_camera_valid_modes(device, dai.CameraBoardSocket.CAM_B)
+        resolutions = get_luxonis_camera_valid_resolutions(device, dai.CameraBoardSocket.CAM_A)
+        modes = get_luxonis_camera_valid_modes(device, dai.CameraBoardSocket.CAM_A)
         has_mono = dai.CameraSensorType.MONO in modes
         device.close()
 
@@ -93,47 +92,59 @@ def detect_cameras(ips: list[str]) -> list[dict]:
                 "mono": has_mono,
             }
         )
-        print(f"    ✓ {len(resolutions)} resolutions, {'MONO' if has_mono else 'COLOR'}")
+        print(f" Valid resolutions: {resolutions}")
+        print(f" Valid modes: {modes}")
+        print(f" Has mono: {has_mono}")
+        # print(f"    ✓ {len(resolutions)} resolutions, {'MONO' if has_mono else 'COLOR'}")
 
     return cameras
 
 
-def create_sources(cameras: list[dict], fps: int) -> tuple[list[LuxonisCameraSource], str | None]:
+def create_sources(cameras: list[dict], fps: int, stereo: bool = True) -> tuple[dict[str, LuxonisCameraSource], str | None]:
     """Create camera sources with largest common resolution."""
-    # Find common resolutions
-    common = set(cameras[0]["resolutions"])
-    for cam in cameras[1:]:
-        common &= set(cam["resolutions"])
-
-    if not common:
-        raise RuntimeError("No common resolution found")
-
-    sorted_resolutions = sorted(common, key=lambda r: r[0] * r[1])
-    if len(sorted_resolutions) < 2:
-        resolution = sorted_resolutions[0]
+    # If stereo is False, force resolution to (1280, 800) and use COLOR
+    if not stereo:
+        resolution = (1280, 800)
+        camera_mode = "COLOR"
+        print(f"  Resolution: {resolution[0]}x{resolution[1]} (forced for mono mode)")
     else:
-        resolution = sorted_resolutions[0]  # Use smallest
-    print(f"  Resolution: {resolution[0]}x{resolution[1]}")
+        # Find common resolutions
+        common = set(cameras[0]["resolutions"])
+        for cam in cameras[1:]:
+            common &= set(cam["resolutions"])
+
+        if not common:
+            raise RuntimeError("No common resolution found")
+
+        sorted_resolutions = sorted(common, key=lambda r: r[0] * r[1])
+        if len(sorted_resolutions) < 2:
+            resolution = sorted_resolutions[0]
+        else:
+            resolution = sorted_resolutions[0]  # Use smallest
+        print(f"  Resolution: {resolution[0]}x{resolution[1]}")
+
+        # Determine camera mode based on capabilities
+        camera_mode = "MONO" if cameras[0]["mono"] else "COLOR"
 
     # Wait for devices to be released after detection
-    time.sleep(1.0)
+    time.sleep(5.0)
 
-    sources = []
+    sources = {}
     first_ip = cameras[0]["ip"] if cameras else None
     for cam in cameras:
         config = LuxonisCameraConfig(
             ip=cam["ip"],
-            stereo=True,
+            stereo=stereo,
             resolution=LuxonisResolution.from_dimensions(resolution[0], resolution[1]),
             fps=fps,
             queue_size=8,
             queue_blocking=False,
-            camera_mode="MONO" if cam["mono"] else "COLOR",
+            camera_mode=camera_mode,
             read_imu=(cam["ip"] == first_ip),  # Enable IMU on first camera
             imu_report_rate=400,
         )
         source = LuxonisCameraSource(config)
-        sources.append(source)
+        sources[cam["ip"]] = source
         imu_status = " (IMU enabled)" if cam["ip"] == first_ip else ""
         print(f"  ✓ {cam['ip']}{imu_status}")
 
@@ -146,6 +157,7 @@ def run(
     fps: int,
     display: bool,
     urdf_path: str = "",
+    stereo: bool = True,
 ) -> None:
     """Run SLAM pipeline.
 
@@ -155,6 +167,7 @@ def run(
         fps: Frame rate.
         display: Whether to display camera feeds.
         urdf_path: Optional path to URDF file with base_link star topology.
+        stereo: Whether to enable stereo mode.
     """
     print("\n" + "=" * 60)
     print("Thor SLAM -> Isaac ROS Visual SLAM")
@@ -162,6 +175,7 @@ def run(
     print(f"Cameras: {num_cameras}")
     print(f"IPs: {', '.join(camera_ips)}")
     print(f"FPS: {fps}")
+    print(f"Stereo: {stereo}")
     if urdf_path:
         print(f"URDF: {urdf_path}")
     print(f"{'=' * 60}\n")
@@ -178,7 +192,7 @@ def run(
 
         # Create sources
         print("\nCreating camera sources...")
-        sources, first_ip = create_sources(cameras, fps)
+        sources, first_ip = create_sources(cameras, fps, stereo=stereo)
 
         # Load rig extrinsics from URDF if provided
         rig_extrinsics = None
@@ -206,24 +220,46 @@ def run(
         # Create rig
         print("\nStarting camera rig...")
 
-        # Fix IMU extrinsics: last row must be [0, 0, 0, 1] for valid homogeneous transform
-        imu_extrinsics = Extrinsics.from_4x4_matrix(
-            np.array(
-                [
-                    [0, 0, -1, 0],
-                    [0, 1, 0, 0],
-                    [1, 0, 0, 0],
-                    [0, 0, 0, 1],  # Fixed: was [1, 0, 0, 1]
-                ]
-            )
+        # Compute IMU extrinsics in world frame
+        imu_extrinsics_world = None
+
+        imu_source_obj = sources[first_ip]
+
+        # Get sensor extrinsics relative to camera source (CAM_A reference frame)
+        imu_to_source_extrinsics = imu_source_obj.get_sensor_extrinsics()
+
+        # Apply coordinate transformation: OAK D Pro IMU uses DRB, camera uses RDF
+        # DRB: X down, Y right, Z back
+        # RDF: X right, Y down, Z forward
+        # Transformation matrix: DRB -> RDF
+        drb_to_rdf_matrix = np.array(
+            [
+                [0, 1, 0, 0],  # DRB X (down) -> RDF Y (down)
+                [1, 0, 0, 0],  # DRB Y (right) -> RDF X (right)
+                [0, 0, -1, 0],  # ULB Z (back) -> RDF Z (forward)
+                [0, 0, 0, 1],
+            ]
         )
+
+        imu_to_source_extrinsics_rdf = drb_to_rdf_matrix @ imu_to_source_extrinsics.to_4x4_matrix()
+
+        world_to_source_matrix = rig_extrinsics.get(first_ip, Extrinsics.from_4x4_matrix(np.eye(4))).to_4x4_matrix()
+        world_to_imu_matrix = world_to_source_matrix @ imu_to_source_extrinsics_rdf
+        imu_extrinsics_world = Extrinsics.from_4x4_matrix(world_to_imu_matrix)
+
+        print(f"  ✓ Computed IMU extrinsics in world frame for {first_ip}")
+
         # Use first camera as IMU source (name is the IP address)
+        imu_extrinsics_obj = None
+        if imu_extrinsics_world and first_ip:
+            imu_extrinsics_obj = IMUExtrinsics(source_name=first_ip, extrinsics=imu_extrinsics_world)
+
         rig = CameraRig(
-            sources=sources,
+            sources=sources.values(),
             queue_size=30,
             rig_extrinsics=rig_extrinsics,
             imu_source=first_ip,
-            imu_extrinsics=imu_extrinsics,
+            imu_extrinsics=imu_extrinsics_obj,
         )
         rig.start()
         print("  ✓ Rig started")
@@ -333,8 +369,9 @@ def main() -> None:
     )
     parser.add_argument(
         "--display",
-        action="store_true",
-        help="Display camera feeds (default: False)",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Show camera feeds (use --no-display to disable).",
     )
     # Default URDF path: examples/assets/brackets.urdf
     default_urdf = Path(__file__).parent.parent / "examples" / "assets" / "brackets.urdf"
@@ -344,6 +381,12 @@ def main() -> None:
         type=str,
         default=str(default_urdf),
         help=f"Path to URDF with base_link star topology (default: {default_urdf})",
+    )
+    parser.add_argument(
+        "--stereo",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Enable stereo (use --no-stereo to disable).",
     )
 
     args = parser.parse_args()
@@ -359,6 +402,7 @@ def main() -> None:
         args.fps,
         args.display,
         urdf_path=args.urdf,
+        stereo=args.stereo,
     )
 
 

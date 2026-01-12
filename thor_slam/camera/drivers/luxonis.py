@@ -245,7 +245,7 @@ class LuxonisCameraSource(CameraSource):
                 self.cfg.imu_report_rate,
             )
             imu_node.enableIMUSensor(
-                dai.IMUSensor.GYROSCOPE_RAW if self.cfg.imu_raw else dai.IMUSensor.GYROSCOPE_CALIBRATED,
+            dai.IMUSensor.GYROSCOPE_RAW if self.cfg.imu_raw else dai.IMUSensor.GYROSCOPE_CALIBRATED,
                 self.cfg.imu_report_rate,
             )
 
@@ -355,6 +355,22 @@ class LuxonisCameraSource(CameraSource):
         self._extrinsics = extrinsics_list
         return self._extrinsics
 
+    def get_sensor_extrinsics(self) -> Extrinsics | None:
+        """Get the extrinsics of a non-camera sensor relative to the CameraSource's reference frame.
+
+        This method is for non-camera sensors (e.g., IMU). For camera sensors, use get_extrinsics().
+        The reference frame is CAM_A (center camera).
+        """
+        try:
+            imu_extrinsics = self._calib_data.getImuToCameraExtrinsics(dai.CameraBoardSocket.CAM_A)
+        except RuntimeError as e:
+            logger.warning("Failed to get IMU extrinsics: %s. Returning identity transformation.", e)
+            return Extrinsics.from_4x4_matrix(np.eye(4))
+
+        extrinsics_matrix = np.array(imu_extrinsics)
+        # Convert translation from cm to meters
+        extrinsics_matrix[:3, 3] /= 100.0
+        return Extrinsics.from_4x4_matrix(imu_extrinsics)
     @property
     def name(self) -> str:
         """Get the name of the camera source."""
