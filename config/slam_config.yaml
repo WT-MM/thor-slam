@@ -4,26 +4,30 @@ cameras:
   # Camera 1: Right cam
   - ip: "192.168.2.21"
     stereo: true
-    resolution: [1280, 800]
+    resolution: [640, 400]
     sensor_type: "MONO"
+    # output_resolution: [640, 400]  # Optional: scale output to this resolution
   
   # Camera 2: Left cam
   - ip: "192.168.2.22"
     stereo: true
-    resolution: [1280, 800]
+    resolution: [640, 400]
     sensor_type: "MONO"
+    # output_resolution: [640, 400]  # Optional: scale output to this resolution
   
-  # # Camera 3: Up cam
-  # - ip: "192.168.2.23"
-  #   stereo: false
-  #   resolution: [1280, 800]
-  #   sensor_type: "COLOR"
+# Camera 3: Up cam
+  - ip: "192.168.2.23"
+    stereo: true
+    resolution: [1920, 1200]
+    sensor_type: "COLOR"
+    output_resolution: [640, 400]  # Optional: scale output to this resolution (e.g., from 1920x1200 to 1280x800)
   
   # Camera 4: Front low cam
   - ip: "192.168.2.25"
     stereo: true
-    resolution: [1280, 800]
+    resolution: [640, 400]
     sensor_type: "MONO"
+    # output_resolution: [640, 400]  # Optional: scale output to this resolution
 
 # Frame rate for all cameras
 fps: 30
@@ -41,5 +45,5 @@ imu_report_rate: 400
 queue_size: 8
 
 # Rig synchronization queue size
-rig_queue_size: 30
+rig_queue_size: 10
 

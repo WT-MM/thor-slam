@@ -15,10 +15,13 @@ def generate_launch_description():
     enable_landmarks_view = LaunchConfiguration('enable_landmarks_view')
     enable_observations_view = LaunchConfiguration('enable_observations_view')
     enable_localization_n_mapping = LaunchConfiguration('enable_localization_n_mapping')
+    multicam_mode = LaunchConfiguration('multicam_mode')
     enable_debug_mode = LaunchConfiguration('enable_debug_mode')
     image_jitter_threshold_ms = LaunchConfiguration('image_jitter_threshold_ms')
+    image_sync_threshold_ms = LaunchConfiguration('image_sync_threshold_ms')
+    image_buffer_size = LaunchConfiguration('image_buffer_size')
     debug_imu_mode = LaunchConfiguration('debug_imu_mode')
-
+    verbosity = LaunchConfiguration('verbosity')
     visual_slam_node = ComposableNode(
         name='visual_slam_node',
         package='isaac_ros_visual_slam',
@@ -34,7 +37,11 @@ def generate_launch_description():
             'enable_localization_n_mapping': enable_localization_n_mapping,
             'enable_debug_mode': enable_debug_mode,
             'image_jitter_threshold_ms': image_jitter_threshold_ms,
+            'image_sync_threshold_ms': image_sync_threshold_ms,
+            'image_buffer_size': image_buffer_size,
             'debug_imu_mode': debug_imu_mode,
+            'verbosity': verbosity,
+            'multicam_mode': multicam_mode,
         }],
     )
 
@@ -58,6 +65,10 @@ def generate_launch_description():
         DeclareLaunchArgument('enable_localization_n_mapping', default_value='True'),
         DeclareLaunchArgument('enable_debug_mode', default_value='True'),
         DeclareLaunchArgument('image_jitter_threshold_ms', default_value='60.0'),
+        DeclareLaunchArgument('image_sync_threshold_ms', default_value='100.0'),
+        DeclareLaunchArgument('image_buffer_size', default_value='10'),
         DeclareLaunchArgument('debug_imu_mode', default_value='False'),
+        DeclareLaunchArgument('verbosity', default_value='1'),
+        DeclareLaunchArgument('multicam_mode', default_value='1'),
         container,
     ])

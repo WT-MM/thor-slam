@@ -209,6 +209,7 @@ class CameraSource(ABC):
         """Check if the camera source has sensor data."""
         pass
 
+
 @dataclass
 class FrameSet:
     """A set of frames from a single camera source.

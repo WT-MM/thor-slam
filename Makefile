@@ -68,6 +68,8 @@ isaac-ros-launch:
 		enable_observations_view:=true \
 		enable_localization_n_mapping:=true \
 		enable_debug_mode:=false \
+		verbosity:=1 \
+		image_sync_threshold_ms:=100.0 \
 
 # ============================================ #
 #              Thor SLAM Bridge                #
@@ -88,10 +90,10 @@ ros2-topics:
 rviz:
 	@echo "Launching RViz with Visual SLAM visualization..."
 	@if [ -f ./config/thor_visual_slam.rviz ]; then \
-		rviz2 -d ./config/thor_visual_slam.rviz; \
+		ros2 run rviz2 rviz2 -d ./config/thor_visual_slam.rviz --ros-args -r /visual_slam/camera_info:=/visual_slam/camera_info_6; \
 	else \
 		echo "Warning: Config file not found at ./config/thor_visual_slam.rviz"; \
-		rviz2; \
+		ros2 run rviz2 rviz2 --ros-args -r /visual_slam/camera_info:=/visual_slam/camera_info_6; \
 	fi
 
 ros2-hz:
