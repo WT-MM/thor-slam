@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Script to run all cameras and compare timestamps to analyze synchronization."""
 
 import argparse

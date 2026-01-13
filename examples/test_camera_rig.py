@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Test script for CameraRig - tests multi-camera synchronization."""
 
 import argparse

@@ -1,5 +1,4 @@
-#!/usr/bin/env python3
-"""Run SLAM with Isaac ROS Visual SLAM.
+"""Run SLAM with# Isaac ROS Visual SLAM.
 
 Publishes camera frames to:
   /visual_slam/image_0, /visual_slam/image_1, ...

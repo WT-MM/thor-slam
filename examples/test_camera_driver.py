@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Test script for Luxonis camera driver - tests both stereo and mono modes."""
 
 import argparse
