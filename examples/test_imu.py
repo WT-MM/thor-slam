@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Test script for IMU readings from a single Luxonis camera."""
 
 import argparse

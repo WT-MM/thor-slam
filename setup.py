@@ -1,5 +1,3 @@
-# mypy: disable-error-code="import-untyped"
-#!/usr/bin/env python
 """Setup script for the project."""
 
 import re

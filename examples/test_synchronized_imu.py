@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Test script for synchronized IMU data in CameraRig with live streaming and plotting."""
 
 import argparse

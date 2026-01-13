@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Script to compute and display depth maps from stereo vision using Luxonis cameras.
 
 Uses LuxonisCameraSource to capture stereo frames and OpenCV StereoSGBM for depth computation.
