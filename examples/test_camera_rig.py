@@ -252,7 +252,7 @@ def test_camera_rig(
             print(f"\nInitializing camera {ip}...")
             selected_res = selected_resolutions[i]
             resolution = LuxonisResolution.from_dimensions(selected_res[0], selected_res[1])
-
+            resolution = LuxonisResolution.from_name("800")
             # Get preferred sensor type (MONO if available, else COLOR)
             cap = camera_capabilities[i]
             sensor_type = cap["sensor_type"]
@@ -457,7 +457,7 @@ def main() -> None:
     parser.add_argument(
         "--fps",
         type=int,
-        default=10,
+        default=30,
         help="FPS (default: 10)",
     )
     parser.add_argument(

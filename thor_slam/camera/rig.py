@@ -14,7 +14,6 @@ from thor_slam.camera.types import CameraSource, Extrinsics, FrameSet, IMUExtrin
 logger = logging.getLogger(__name__)
 
 
-
 @dataclass
 class RigCalibration:
     """Calibration data for the entire camera rig.
@@ -140,7 +139,10 @@ class CameraRig:
         # Build imu extrinsics (identity if not provided)
         if not imu_extrinsics:
             logger.warning("No imu extrinsics provided, using identity transformation for the IMU")
-            imu_extrinsics = IMUExtrinsics(source_name=self._imu_source, extrinsics=Extrinsics.from_4x4_matrix(np.eye(4)))
+            imu_extrinsics = IMUExtrinsics(
+                source_name=self._imu_source if self._imu_source is not None else "",
+                extrinsics=Extrinsics.from_4x4_matrix(np.eye(4)),
+            )
 
         # Build calibration
         self._calibration = self._build_calibration(rig_extrinsics, imu_extrinsics)
@@ -192,7 +194,9 @@ class CameraRig:
         """Check if the rig is running."""
         return self._running
 
-    def _build_calibration(self, rig_extrinsics: dict[str, Extrinsics], imu_extrinsics: IMUExtrinsics) -> RigCalibration:
+    def _build_calibration(
+        self, rig_extrinsics: dict[str, Extrinsics], imu_extrinsics: IMUExtrinsics
+    ) -> RigCalibration:
         """Build calibration data from all sources.
 
         Args:
@@ -240,7 +244,10 @@ class CameraRig:
             new_imu_extrinsics = imu_extrinsics
         else:
             # Use existing IMU extrinsics or identity if None
-            new_imu_extrinsics = self._calibration.imu_extrinsics or IMUExtrinsics(source_name=self._imu_source, extrinsics=Extrinsics.from_4x4_matrix(np.eye(4)))
+            new_imu_extrinsics = self._calibration.imu_extrinsics or IMUExtrinsics(
+                source_name=self._imu_source if self._imu_source is not None else "",
+                extrinsics=Extrinsics.from_4x4_matrix(np.eye(4)),
+            )
         self._calibration = self._build_calibration(new_rig_extrinsics, new_imu_extrinsics)
 
     def get_rig_extrinsics(self, source_name: str) -> Extrinsics | None:
@@ -407,15 +414,16 @@ class CameraRig:
             sensor_timestamp=sensor_timestamp,
         )
 
-    def get_latest_frames(self) -> dict[str, FrameSet] | None:
+    def get_latest_frames(self) -> SynchronizedFrameSet | None:
         """Get the latest frames from all cameras without synchronization.
 
         This returns the most recent FrameSet from each camera's queue,
         without any timestamp matching. Each FrameSet preserves the individual
-        frame timestamps.
+        frame timestamps. Returns a SynchronizedFrameSet for consistency with
+        get_synchronized_frames().
 
         Returns:
-            Dictionary mapping source_name -> latest FrameSet, or None if any camera has no frames.
+            SynchronizedFrameSet with latest frames, or None if any camera has no frames.
         """
         if not self._running:
             return None
@@ -423,15 +431,42 @@ class CameraRig:
         # Poll cameras for new frames first
         self._poll_cameras()
 
-        result: dict[str, FrameSet] = {}
+        frame_sets: dict[str, FrameSet] = {}
+        timestamps: list[float] = []
+
         with self._lock:
             for name, queue in self._frame_queues.items():
                 if not queue:
                     logger.warning("Camera %s has no frames yet", name)
                     return None  # A camera has no frames yet
-                result[name] = queue[-1]  # Get the most recent frame set
+                latest_frame_set = queue[-1]  # Get the most recent frame set
+                frame_sets[name] = latest_frame_set
+                timestamps.append(latest_frame_set.timestamp)
 
-        return result
+        # Use the maximum (newest) timestamp as reference for latest frames
+        reference_timestamp = max(timestamps) if timestamps else 0.0
+
+        # Calculate max time delta (spread between oldest and newest)
+        max_time_delta = max(timestamps) - min(timestamps) if timestamps else 0.0
+
+        # Get IMU data if available
+        sensor_data: dict | None = None
+        sensor_timestamp: float | None = None
+
+        if self._imu_source is not None and self._imu_queue:
+            # Use the newest IMU data available
+            imu_timestamp, imu_data = self._imu_queue[-1]
+            if imu_data is not None:
+                sensor_data = imu_data
+                sensor_timestamp = imu_timestamp
+
+        return SynchronizedFrameSet(
+            timestamp=reference_timestamp,
+            frame_sets=frame_sets,
+            max_time_delta=max_time_delta,
+            sensor_data=sensor_data,
+            sensor_timestamp=sensor_timestamp,
+        )
 
     def get_source_names(self) -> list[str]:
         """Get the names of all camera sources."""

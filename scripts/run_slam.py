@@ -13,13 +13,14 @@ Example:
     python -m scripts.run_slam --config /path/to/config.yaml
 """
 
+import argparse
 import logging
 import signal
 import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import cv2
 import numpy as np
@@ -31,7 +32,7 @@ from thor_slam.camera.drivers.luxonis import (
     LuxonisResolution,
 )
 from thor_slam.camera.rig import CameraRig
-from thor_slam.camera.types import Extrinsics, IMUExtrinsics
+from thor_slam.camera.types import CameraSensorType, Extrinsics, IMUExtrinsics
 from thor_slam.camera.utils import load_rig_extrinsics_from_urdf
 from thor_slam.slam import IsaacRosAdapter
 
@@ -58,6 +59,7 @@ class CameraConfig:
     stereo: bool
     resolution: tuple[int, int]  # (width, height)
     sensor_type: str  # "COLOR" or "MONO"
+    output_resolution: tuple[int, int] | None = None  # Optional output resolution to scale to
 
 
 @dataclass
@@ -78,12 +80,16 @@ class SlamConfig:
         cameras = []
         for cam_data in data.get("cameras", []):
             resolution = cam_data.get("resolution", [1280, 800])
+            output_resolution = cam_data.get("output_resolution")
             cameras.append(
                 CameraConfig(
                     ip=cam_data["ip"],
                     stereo=cam_data.get("stereo", True),
                     resolution=(resolution[0], resolution[1]),
                     sensor_type=cam_data.get("sensor_type", "COLOR").upper(),
+                    output_resolution=(
+                        (output_resolution[0], output_resolution[1]) if output_resolution is not None else None
+                    ),
                 )
             )
 
@@ -136,6 +142,12 @@ def create_sources(config: SlamConfig) -> tuple[dict[str, LuxonisCameraSource], 
 
     for cam_config in config.cameras:
         # Create camera config directly from config values
+        output_resolution = None
+        if cam_config.output_resolution is not None:
+            output_resolution = LuxonisResolution.from_dimensions(
+                cam_config.output_resolution[0], cam_config.output_resolution[1]
+            )
+
         luxonis_config = LuxonisCameraConfig(
             ip=cam_config.ip,
             stereo=cam_config.stereo,
@@ -143,9 +155,10 @@ def create_sources(config: SlamConfig) -> tuple[dict[str, LuxonisCameraSource], 
             fps=config.fps,
             queue_size=config.queue_size,
             queue_blocking=False,
-            camera_mode=cam_config.sensor_type,
+            camera_mode=cast(CameraSensorType, cam_config.sensor_type),
             read_imu=(cam_config.ip == first_ip),  # Enable IMU on first camera
             imu_report_rate=config.imu_report_rate,
+            output_resolution=output_resolution,
         )
 
         source = LuxonisCameraSource(luxonis_config)
@@ -153,7 +166,21 @@ def create_sources(config: SlamConfig) -> tuple[dict[str, LuxonisCameraSource], 
 
         imu_status = " (IMU enabled)" if cam_config.ip == first_ip else ""
         stereo_status = "stereo" if cam_config.stereo else "mono"
-        print(f"  ✓ {cam_config.ip}: {stereo_status}, {cam_config.resolution[0]}x{cam_config.resolution[1]}, {cam_config.sensor_type}{imu_status}")
+        output_info = (
+            f" -> {cam_config.output_resolution[0]}x{cam_config.output_resolution[1]}"
+            if cam_config.output_resolution
+            else ""
+        )
+        print(
+            (
+                f"  ✓ {cam_config.ip}: "
+                f"{stereo_status},"
+                f"{cam_config.resolution[0]}x{cam_config.resolution[1]}"
+                f"{output_info}, "
+                f"{cam_config.sensor_type}"
+                f"{imu_status}"
+            )
+        )
 
     return sources, first_ip
 
@@ -173,7 +200,7 @@ def run(config: SlamConfig) -> None:
     print(f"Physical cameras: {len(config.cameras)}")
     for i, cam in enumerate(config.cameras):
         stereo_str = "stereo" if cam.stereo else "mono"
-        print(f"  Camera {i+1}: {cam.ip} ({stereo_str}, {cam.resolution[0]}x{cam.resolution[1]}, {cam.sensor_type})")
+        print(f"  Camera {i + 1}: {cam.ip} ({stereo_str}, {cam.resolution[0]}x{cam.resolution[1]}, {cam.sensor_type})")
     print(f"FPS: {config.fps}")
     if config.urdf_path:
         print(f"URDF: {config.urdf_path}")
@@ -185,6 +212,8 @@ def run(config: SlamConfig) -> None:
     try:
         # Create sources
         sources, first_ip = create_sources(config)
+
+        assert first_ip is not None
 
         # Load rig extrinsics from URDF if provided
         rig_extrinsics = None
@@ -234,6 +263,8 @@ def run(config: SlamConfig) -> None:
             ]
         )
 
+        assert imu_to_source_extrinsics is not None
+
         imu_to_source_extrinsics_rdf = drb_to_rdf_matrix @ imu_to_source_extrinsics.to_4x4_matrix()
 
         if rig_extrinsics:
@@ -251,7 +282,7 @@ def run(config: SlamConfig) -> None:
             imu_extrinsics_obj = IMUExtrinsics(source_name=first_ip, extrinsics=imu_extrinsics_world)
 
         rig = CameraRig(
-            sources=sources.values(),
+            sources=list(sources.values()),
             queue_size=config.rig_queue_size,
             rig_extrinsics=rig_extrinsics,
             imu_source=first_ip,
@@ -281,6 +312,7 @@ def run(config: SlamConfig) -> None:
 
         while not _shutdown:
             sync = rig.get_synchronized_frames()
+            # sync = rig.get_latest_frames()
             if sync is None:
                 time.sleep(0.001)
                 continue
@@ -339,8 +371,6 @@ def run(config: SlamConfig) -> None:
 
 def main() -> None:
     """Entry point."""
-    import argparse
-
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
 
@@ -361,25 +391,22 @@ def main() -> None:
         config = load_config(config_path)
     except FileNotFoundError as e:
         print(f"Error: {e}")
-        print(f"\nExample config structure:")
-        print(yaml.dump(
-            {
-                "cameras": [
-                    {
-                        "ip": "192.168.2.21",
-                        "stereo": True,
-                        "resolution": [1280, 800],
-                        "sensor_type": "COLOR"
-                    }
-                ],
-                "fps": 30,
-                "display": False,
-                "urdf_path": "",
-                "imu_report_rate": 400
-            },
-            default_flow_style=False,
-            sort_keys=False
-        ))
+        print("\nExample config structure:")
+        print(
+            yaml.dump(
+                {
+                    "cameras": [
+                        {"ip": "192.168.2.21", "stereo": True, "resolution": [1280, 800], "sensor_type": "COLOR"}
+                    ],
+                    "fps": 30,
+                    "display": False,
+                    "urdf_path": "",
+                    "imu_report_rate": 400,
+                },
+                default_flow_style=False,
+                sort_keys=False,
+            )
+        )
         sys.exit(1)
     except Exception as e:
         print(f"Error loading config: {e}")

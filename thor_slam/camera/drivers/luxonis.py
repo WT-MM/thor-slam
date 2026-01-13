@@ -104,6 +104,7 @@ class LuxonisCameraConfig:
     imu_batch_threshold: int = 1  # Number of IMU packets to batch before reporting
     imu_max_batch_reports: int = 10  # Maximum number of batched reports
     imu_raw: bool = False  # If True, returns raw IMU data
+    output_resolution: LuxonisResolution | None = None  # If set, rescale output to this resolution
 
 
 class LuxonisCameraSource(CameraSource):
@@ -118,6 +119,7 @@ class LuxonisCameraSource(CameraSource):
     _running: bool
     _valid_resolutions: list[tuple[int, int]]
     _has_sensor_data: bool
+    _output_resolution: LuxonisResolution | None
 
     def __init__(self, cfg: LuxonisCameraConfig) -> None:
         """Initialize the camera source."""
@@ -184,6 +186,11 @@ class LuxonisCameraSource(CameraSource):
         # Store camera mode (sensor type) for pipeline building
         self._camera_mode = camera_sensor_type_to_dai[self.cfg.camera_mode]
 
+        self._output_resolution = self.cfg.output_resolution
+
+        if self._output_resolution is None:
+            self._output_resolution = self.cfg.resolution
+
         # Initialize intrinsics and extrinsics
         self._intrinsics: list[Intrinsics] | None = None
         self._extrinsics: list[Extrinsics] | None = None
@@ -193,44 +200,58 @@ class LuxonisCameraSource(CameraSource):
         # Create pipeline with device
         self._pipeline = dai.Pipeline(self.device)
 
-        resolution = self.cfg.resolution.as_tuple()
+        sensor_resolution = self.cfg.resolution.as_tuple()
         fps = float(self.cfg.fps)
 
-        if self.cfg.stereo:
-            # Create stereo pair
-            left_camera = self._pipeline.create(dai.node.Camera)
-            right_camera = self._pipeline.create(dai.node.Camera)
-
-            # Build cameras with socket, resolution, and fps
-            left_camera.build(boardSocket=dai.CameraBoardSocket.CAM_B, sensorResolution=resolution, sensorFps=fps)
-            right_camera.build(boardSocket=dai.CameraBoardSocket.CAM_C, sensorResolution=resolution, sensorFps=fps)
-
-            left_camera.setSensorType(self._camera_mode)
-            right_camera.setSensorType(self._camera_mode)
-
-            # Request outputs and create queues
-            left_output = left_camera.requestOutput(size=resolution, fps=fps)
-            right_output = right_camera.requestOutput(size=resolution, fps=fps)
-
-            self._output_queues["left"] = left_output.createOutputQueue(
-                maxSize=self.cfg.queue_size, blocking=self.cfg.queue_blocking
-            )
-            self._output_queues["right"] = right_output.createOutputQueue(
-                maxSize=self.cfg.queue_size, blocking=self.cfg.queue_blocking
-            )
+        # Output size (may differ from sensor size)
+        if self.cfg.output_resolution is not None:
+            output_size = self.cfg.output_resolution.as_tuple()
         else:
-            # Create RGB camera
-            rgb_camera = self._pipeline.create(dai.node.Camera)
+            output_size = sensor_resolution
 
-            # Build camera with socket, resolution, and fps
-            rgb_camera.build(boardSocket=dai.CameraBoardSocket.CAM_A, sensorResolution=resolution, sensorFps=fps)
+        resize_mode = dai.ImgResizeMode.STRETCH
 
-            rgb_camera.setSensorType(self._camera_mode)
+        if self.cfg.stereo:
+            # Left camera (CAM_B)
+            left_cam = self._pipeline.create(dai.node.Camera)
+            left_cam.setSensorType(self._camera_mode)
+            left_cam.build(boardSocket=dai.CameraBoardSocket.CAM_B, sensorResolution=sensor_resolution, sensorFps=fps)
 
-            # Request output and create queue
-            rgb_output = rgb_camera.requestOutput(size=resolution, fps=fps)
+            if output_size != sensor_resolution:
+                left_out = left_cam.requestOutput(size=output_size, resizeMode=resize_mode, fps=fps)
+            else:
+                left_out = left_cam.requestOutput(size=output_size, fps=fps)
 
-            self._output_queues["rgb"] = rgb_output.createOutputQueue(
+            self._output_queues["left"] = left_out.createOutputQueue(
+                maxSize=self.cfg.queue_size, blocking=self.cfg.queue_blocking
+            )
+
+            # Right camera (CAM_C)
+            right_cam = self._pipeline.create(dai.node.Camera)
+            right_cam.setSensorType(self._camera_mode)
+            right_cam.build(boardSocket=dai.CameraBoardSocket.CAM_C, sensorResolution=sensor_resolution, sensorFps=fps)
+
+            if output_size != sensor_resolution:
+                right_out = right_cam.requestOutput(size=output_size, resizeMode=resize_mode, fps=fps)
+            else:
+                right_out = right_cam.requestOutput(size=output_size, fps=fps)
+
+            self._output_queues["right"] = right_out.createOutputQueue(
+                maxSize=self.cfg.queue_size, blocking=self.cfg.queue_blocking
+            )
+
+        else:
+            # Single camera (CAM_A)
+            cam = self._pipeline.create(dai.node.Camera)
+            cam.setSensorType(self._camera_mode)
+            cam.build(boardSocket=dai.CameraBoardSocket.CAM_A, sensorResolution=sensor_resolution, sensorFps=fps)
+
+            if output_size != sensor_resolution:
+                out = cam.requestOutput(size=output_size, resizeMode=resize_mode, fps=fps)
+            else:
+                out = cam.requestOutput(size=output_size, fps=fps)
+
+            self._output_queues["rgb"] = out.createOutputQueue(
                 maxSize=self.cfg.queue_size, blocking=self.cfg.queue_blocking
             )
 
@@ -245,7 +266,7 @@ class LuxonisCameraSource(CameraSource):
                 self.cfg.imu_report_rate,
             )
             imu_node.enableIMUSensor(
-            dai.IMUSensor.GYROSCOPE_RAW if self.cfg.imu_raw else dai.IMUSensor.GYROSCOPE_CALIBRATED,
+                dai.IMUSensor.GYROSCOPE_RAW if self.cfg.imu_raw else dai.IMUSensor.GYROSCOPE_CALIBRATED,
                 self.cfg.imu_report_rate,
             )
 
@@ -261,44 +282,57 @@ class LuxonisCameraSource(CameraSource):
         self._pipeline.start()
 
     def get_intrinsics(self) -> list[Intrinsics]:
-        """Get the intrinsics of the camera source. If stereo, returns [left, right]."""
+        """Get intrinsics. If output_resolution is set, scale intrinsics accordingly.
+
+        If stereo, returns [left, right].
+        """
         if self._intrinsics is not None:
             return self._intrinsics
 
         intrinsics_list: list[Intrinsics] = []
 
+        if self.cfg.output_resolution is not None:
+            output_width = self.cfg.output_resolution.width
+            output_height = self.cfg.output_resolution.height
+            scale_x = output_width / self.cfg.resolution.width
+            scale_y = output_height / self.cfg.resolution.height
+        else:
+            output_width = self.cfg.resolution.width
+            output_height = self.cfg.resolution.height
+            scale_x = 1.0
+            scale_y = 1.0
+
         if self.cfg.stereo:
-            # For stereo cameras, return both left and right intrinsics
-            # Left camera (CAM_B)
             left_matrix = np.array(
                 self._calib_data.getCameraIntrinsics(
                     dai.CameraBoardSocket.CAM_B, self.cfg.resolution.width, self.cfg.resolution.height
                 )
             )
+            left_matrix_scaled = left_matrix.copy()
+            left_matrix_scaled[0, 0] *= scale_x
+            left_matrix_scaled[1, 1] *= scale_y
+            left_matrix_scaled[0, 2] *= scale_x
+            left_matrix_scaled[1, 2] *= scale_y
+
             left_coeffs = np.array(self._calib_data.getDistortionCoefficients(dai.CameraBoardSocket.CAM_B))
             intrinsics_list.append(
-                Intrinsics(
-                    width=self.cfg.resolution.width,
-                    height=self.cfg.resolution.height,
-                    matrix=left_matrix,
-                    coeffs=left_coeffs,
-                )
+                Intrinsics(width=output_width, height=output_height, matrix=left_matrix_scaled, coeffs=left_coeffs)
             )
 
-            # Right camera (CAM_C)
             right_matrix = np.array(
                 self._calib_data.getCameraIntrinsics(
                     dai.CameraBoardSocket.CAM_C, self.cfg.resolution.width, self.cfg.resolution.height
                 )
             )
+            right_matrix_scaled = right_matrix.copy()
+            right_matrix_scaled[0, 0] *= scale_x
+            right_matrix_scaled[1, 1] *= scale_y
+            right_matrix_scaled[0, 2] *= scale_x
+            right_matrix_scaled[1, 2] *= scale_y
+
             right_coeffs = np.array(self._calib_data.getDistortionCoefficients(dai.CameraBoardSocket.CAM_C))
             intrinsics_list.append(
-                Intrinsics(
-                    width=self.cfg.resolution.width,
-                    height=self.cfg.resolution.height,
-                    matrix=right_matrix,
-                    coeffs=right_coeffs,
-                )
+                Intrinsics(width=output_width, height=output_height, matrix=right_matrix_scaled, coeffs=right_coeffs)
             )
         else:
             rgb_matrix = np.array(
@@ -306,14 +340,15 @@ class LuxonisCameraSource(CameraSource):
                     dai.CameraBoardSocket.CAM_A, self.cfg.resolution.width, self.cfg.resolution.height
                 )
             )
+            rgb_matrix_scaled = rgb_matrix.copy()
+            rgb_matrix_scaled[0, 0] *= scale_x
+            rgb_matrix_scaled[1, 1] *= scale_y
+            rgb_matrix_scaled[0, 2] *= scale_x
+            rgb_matrix_scaled[1, 2] *= scale_y
+
             rgb_coeffs = np.array(self._calib_data.getDistortionCoefficients(dai.CameraBoardSocket.CAM_A))
             intrinsics_list.append(
-                Intrinsics(
-                    width=self.cfg.resolution.width,
-                    height=self.cfg.resolution.height,
-                    matrix=rgb_matrix,
-                    coeffs=rgb_coeffs,
-                )
+                Intrinsics(width=output_width, height=output_height, matrix=rgb_matrix_scaled, coeffs=rgb_coeffs)
             )
 
         self._intrinsics = intrinsics_list
@@ -371,6 +406,7 @@ class LuxonisCameraSource(CameraSource):
         # Convert translation from cm to meters
         extrinsics_matrix[:3, 3] /= 100.0
         return Extrinsics.from_4x4_matrix(imu_extrinsics)
+
     @property
     def name(self) -> str:
         """Get the name of the camera source."""
