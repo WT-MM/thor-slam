@@ -63,7 +63,7 @@ isaac-ros-launch:
 		num_cameras:=$(NUM_CAMERAS) \
 		enable_slam_visualization:=true \
 		rectified_images:=false \
-		enable_imu_fusion:=false \
+		enable_imu_fusion:=true \
 		enable_landmarks_view:=true \
 		enable_observations_view:=true \
 		enable_localization_n_mapping:=true \
@@ -74,6 +74,9 @@ isaac-ros-launch:
 # ============================================ #
 #              Thor SLAM Bridge                #
 # ============================================ #
+
+install-force:
+	pip install --break-system-packages .
 
 # Run the camera bridge
 slam-run:

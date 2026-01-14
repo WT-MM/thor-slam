@@ -22,6 +22,10 @@ def generate_launch_description():
     image_buffer_size = LaunchConfiguration('image_buffer_size')
     debug_imu_mode = LaunchConfiguration('debug_imu_mode')
     verbosity = LaunchConfiguration('verbosity')
+    gyroscope_noise_density = LaunchConfiguration('gyroscope_noise_density')
+    accelerometer_noise_density = LaunchConfiguration('accelerometer_noise_density')
+    gyroscope_random_walk = LaunchConfiguration('gyroscope_random_walk')
+    accelerometer_random_walk = LaunchConfiguration('accelerometer_random_walk')
     visual_slam_node = ComposableNode(
         name='visual_slam_node',
         package='isaac_ros_visual_slam',
@@ -42,6 +46,10 @@ def generate_launch_description():
             'debug_imu_mode': debug_imu_mode,
             'verbosity': verbosity,
             'multicam_mode': multicam_mode,
+            'gyroscope_noise_density': gyroscope_noise_density,
+            'accelerometer_noise_density': accelerometer_noise_density,
+            'gyroscope_random_walk': gyroscope_random_walk,
+            'accelerometer_random_walk': accelerometer_random_walk,
         }],
     )
 
@@ -70,5 +78,32 @@ def generate_launch_description():
         DeclareLaunchArgument('debug_imu_mode', default_value='False'),
         DeclareLaunchArgument('verbosity', default_value='1'),
         DeclareLaunchArgument('multicam_mode', default_value='1'),
+        DeclareLaunchArgument('gyroscope_noise_density', default_value='8.27e-5', description='Gyroscope noise density (rad/s/√Hz)'),
+        DeclareLaunchArgument('accelerometer_noise_density', default_value='2.553e-3', description='Accelerometer noise density (m/s²/√Hz)'),
+        DeclareLaunchArgument('gyroscope_random_walk', default_value='0.00000001', description='Gyroscope random walk (rad/s²/√Hz)'),
+        DeclareLaunchArgument('accelerometer_random_walk', default_value='0.00010493', description='Accelerometer random walk (m/s³/√Hz)'),
         container,
     ])
+"""
+Datasheet values for BNO085:
+        DeclareLaunchArgument('gyroscope_noise_density', default_value='2.44e-4', description='Gyroscope noise density (rad/s/√Hz)'),
+        DeclareLaunchArgument('accelerometer_noise_density', default_value='1.47e-3', description='Accelerometer noise density (m/s²/√Hz)'),
+"""
+
+"""
+Values from 2.5 hr rosbag:
+fs_used: 200.0 Hz
+gyroscope_noise_density:      8.272408664902705e-05
+gyroscope_random_walk:        None
+accelerometer_noise_density:  0.0025532489945649236
+accelerometer_random_walk:    0.00010493289270471003
+"""
+
+"""
+Defaults from isaac ros visual slam node:
+gyroscope_noise_density: 0.000244
+[component_container-1] [INFO] [1768343753.129192437] [visual_slam_node]: gyroscope_random_walk: 0.000019
+[component_container-1] [INFO] [1768343753.129198270] [visual_slam_node]: accelerometer_noise_density: 0.001862
+[component_container-1] [INFO] [1768343753.129204836] [visual_slam_node]: accelerometer_random_walk: 0.003000
+
+"""

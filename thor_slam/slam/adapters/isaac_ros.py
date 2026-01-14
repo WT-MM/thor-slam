@@ -305,8 +305,8 @@ class IsaacRosAdapter(SlamEngine):
 
             stamp = Time()
 
-            stamp.sec = int(frame.timestamp / 5)
-            stamp.nanosec = int((frame.timestamp / 5 - int(frame.timestamp / 5)) * 1e9)
+            stamp.sec = int(frame.timestamp / 1)
+            stamp.nanosec = int((frame.timestamp / 1 - int(frame.timestamp / 1)) * 1e9)
 
             img = frame.image
             if len(img.shape) == 2:
