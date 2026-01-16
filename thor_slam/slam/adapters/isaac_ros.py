@@ -157,7 +157,7 @@ class IsaacRosAdapter(SlamEngine):
         return cameras
 
     def _publish_tf(self) -> None:
-        """Publish static TF from base_link to each camera."""
+        """Publish static TF from base_link to each camera and optical frames."""
         if not self._tf_broadcaster or not self._node:
             return
 
@@ -165,6 +165,7 @@ class IsaacRosAdapter(SlamEngine):
         transforms = []
 
         for i, cam in enumerate(self._cameras):
+            # base_link -> camera_{i}
             t = TransformStamped()
             t.header.stamp = stamp
             t.header.frame_id = "base_link"
@@ -182,8 +183,43 @@ class IsaacRosAdapter(SlamEngine):
 
             transforms.append(t)
 
+            # camera_{i} -> camera_{i}_optical_frame
+            # Optical frame uses RDF convention: +x right, +y down, +z forward
+            # Camera frame (from Isaac ROS) uses FLU: +x forward, +y left, +z up
+            # Transform: FLU -> RDF (inverse of RDF_TO_FLU_MATRIX)
+            t_optical = TransformStamped()
+            t_optical.header.stamp = stamp
+            t_optical.header.frame_id = f"camera_{i}"
+            t_optical.child_frame_id = f"camera_{i}_optical_frame"
+
+            # Identity translation (optical frame is at same position as camera frame)
+            t_optical.transform.translation.x = 0.0
+            t_optical.transform.translation.y = 0.0
+            t_optical.transform.translation.z = 0.0
+
+            # FLU -> RDF transformation matrix (inverse of RDF_TO_FLU_MATRIX)
+            # FLU: +x forward, +y left, +z up
+            # RDF: +x right, +y down, +z forward
+            # x_rdf = -y_flu, y_rdf = -z_flu, z_rdf = x_flu
+            flu_to_rdf_matrix = np.array(
+                [
+                    [0, -1, 0, 0],  # x_rdf = -y_flu
+                    [0, 0, -1, 0],  # y_rdf = -z_flu
+                    [1, 0, 0, 0],   # z_rdf = x_flu
+                    [0, 0, 0, 1],
+                ]
+            )
+            q_optical = Rotation.from_matrix(flu_to_rdf_matrix[:3, :3]).as_quat()
+            t_optical.transform.rotation.x = float(q_optical[0])
+            t_optical.transform.rotation.y = float(q_optical[1])
+            t_optical.transform.rotation.z = float(q_optical[2])
+            t_optical.transform.rotation.w = float(q_optical[3])
+
+            transforms.append(t_optical)
+
         self._tf_broadcaster.sendTransform(transforms)
-        logger.info("Published TF: base_link -> camera_0..%d", len(transforms) - 1)
+        logger.info("Published TF: base_link -> camera_0..%d, camera_0..%d -> camera_0..%d_optical_frame", 
+                    len(self._cameras) - 1, len(self._cameras) - 1, len(self._cameras) - 1)
 
     def _publish_imu_tf(self) -> None:
         """Publish static TF from base_link to imu_link."""

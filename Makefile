@@ -159,6 +159,23 @@ NVBLOX_NUM_CAMERAS ?= 1
 # Topics expected: /camera_0/rgb/image_raw, /camera_0/depth/image_raw, etc.
 # Note: NUM_CAMERAS here refers to RGB-D cameras, not SLAM cameras
 # Uses the official nvblox_examples_bringup launch file
+## Publish TF from odometry messages (required for nvblox)
+## Usage: make odom-to-tf [ODOM_TOPIC=/visual_slam/tracking/odometry] [CHILD_FRAME=base_link]
+odom-to-tf:
+	@if ! command -v ros2 >/dev/null 2>&1; then \
+		echo "Error: ROS2 not found. Please source your ROS2 installation."; \
+		exit 1; \
+	fi
+	@echo "Publishing TF from odometry..."
+	@echo "  Topic: $(or $(ODOM_TOPIC),/visual_slam/tracking/odometry)"
+	@echo "  Transform: odom -> $(or $(CHILD_FRAME),base_link)"
+	@echo ""
+	@echo "Press Ctrl+C to stop."
+	python3 -m scripts.odom_to_tf \
+		--odom-topic $(or $(ODOM_TOPIC),/visual_slam/tracking/odometry) \
+		--parent-frame odom \
+		--default-child-frame $(or $(CHILD_FRAME),base_link)
+
 nvblox-launch:
 	@echo "Launching nvblox ($(NVBLOX_NUM_CAMERAS) RGB-D camera(s))..."
 	@echo "Expected topics:"
@@ -168,6 +185,9 @@ nvblox-launch:
 	@echo ""
 	@echo "Note: Make sure pipeline-run is publishing RGB-D data for these cameras"
 	@echo "      (configure nvblox_cameras in config/slam_config.yaml)"
+	@echo ""
+	@echo "Note: Make sure TF chain exists: odom -> base_link -> camera_0_optical_frame"
+	@echo "      Run 'make odom-to-tf' in another terminal if odom->base_link is missing"
 	@echo ""
 	@if ! command -v ros2 >/dev/null 2>&1; then \
 		echo "Error: ROS2 not found. Please source your ROS2 installation."; \

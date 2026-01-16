@@ -35,7 +35,7 @@ from builtin_interfaces.msg import Time
 from cv_bridge import CvBridge
 from rclpy.node import Node
 from rclpy.publisher import Publisher
-from rclpy.qos import qos_profile_sensor_data
+from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy, HistoryPolicy
 from sensor_msgs.msg import CameraInfo, Image
 
 import depthai as dai
@@ -174,12 +174,20 @@ class RGBDPublisher(Node):
         self._bridge = CvBridge()
         self._spin_thread: threading.Thread | None = None
 
+        # Use RELIABLE QoS for RGB-D topics (required for nvblox and RViz)
+        rgbd_qos = QoSProfile(
+            depth=10,
+            reliability=ReliabilityPolicy.RELIABLE,
+            durability=DurabilityPolicy.VOLATILE,
+            history=HistoryPolicy.KEEP_LAST,
+        )
+
         # Create namespaced publishers
         namespace = f"/camera_{camera_index}"
-        self._rgb_pub = self.create_publisher(Image, f"{namespace}/rgb/image_raw", qos_profile_sensor_data)
-        self._rgb_info_pub = self.create_publisher(CameraInfo, f"{namespace}/rgb/camera_info", qos_profile_sensor_data)
-        self._depth_pub = self.create_publisher(Image, f"{namespace}/depth/image_raw", qos_profile_sensor_data)
-        self._depth_info_pub = self.create_publisher(CameraInfo, f"{namespace}/depth/camera_info", qos_profile_sensor_data)
+        self._rgb_pub = self.create_publisher(Image, f"{namespace}/rgb/image_raw", rgbd_qos)
+        self._rgb_info_pub = self.create_publisher(CameraInfo, f"{namespace}/rgb/camera_info", rgbd_qos)
+        self._depth_pub = self.create_publisher(Image, f"{namespace}/depth/image_raw", rgbd_qos)
+        self._depth_info_pub = self.create_publisher(CameraInfo, f"{namespace}/depth/camera_info", rgbd_qos)
 
         # Get intrinsics
         self._rgb_intrinsics, self._depth_intrinsics = camera.get_rgbd_intrinsics()
