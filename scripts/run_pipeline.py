@@ -28,17 +28,15 @@ from pathlib import Path
 from typing import Any, cast
 
 import cv2
+import depthai as dai
 import numpy as np
 import rclpy
 import yaml
 from builtin_interfaces.msg import Time
-from cv_bridge import CvBridge
+from cv_bridge import CvBridge  # type: ignore[import-untyped]
 from rclpy.node import Node
-from rclpy.publisher import Publisher
-from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy, HistoryPolicy
+from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import CameraInfo, Image
-
-import depthai as dai
 
 from thor_slam.camera.drivers.luxonis import (
     LuxonisCameraConfig,
@@ -46,7 +44,7 @@ from thor_slam.camera.drivers.luxonis import (
     LuxonisResolution,
 )
 from thor_slam.camera.rig import CameraRig
-from thor_slam.camera.types import CameraSensorType, Extrinsics, IMUExtrinsics
+from thor_slam.camera.types import CameraFrame, CameraSensorType, Extrinsics, IMUExtrinsics, Intrinsics
 from thor_slam.camera.utils import load_rig_extrinsics_from_urdf
 from thor_slam.slam import IsaacRosAdapter
 
@@ -75,8 +73,12 @@ class CameraConfig:
     sensor_type: str  # "COLOR" or "MONO"
     output_resolution: tuple[int, int] | None = None  # Optional output resolution to scale to
     enable_rgbd: bool = False  # Enable RGB-D streams for this camera
-    rgb_sensor_resolution: tuple[int, int] | None = None  # Optional RGB sensor resolution (CAM_A) - auto-selected if not specified
-    rgb_output_resolution: tuple[int, int] | None = None  # Optional RGB output resolution for RGB-D (independent from stereo resolution)
+    rgb_sensor_resolution: tuple[int, int] | None = (
+        None  # Optional RGB sensor resolution (CAM_A) - auto-selected if not specified
+    )
+    rgb_output_resolution: tuple[int, int] | None = (
+        None  # Optional RGB output resolution for RGB-D (independent from stereo resolution)
+    )
 
 
 @dataclass
@@ -113,10 +115,14 @@ class PipelineConfig:
                     ),
                     enable_rgbd=cam_data.get("enable_rgbd", False),
                     rgb_sensor_resolution=(
-                        (rgb_sensor_resolution[0], rgb_sensor_resolution[1]) if rgb_sensor_resolution is not None else None
+                        (rgb_sensor_resolution[0], rgb_sensor_resolution[1])
+                        if rgb_sensor_resolution is not None
+                        else None
                     ),
                     rgb_output_resolution=(
-                        (rgb_output_resolution[0], rgb_output_resolution[1]) if rgb_output_resolution is not None else None
+                        (rgb_output_resolution[0], rgb_output_resolution[1])
+                        if rgb_output_resolution is not None
+                        else None
                     ),
                 )
             )
@@ -159,7 +165,7 @@ class PipelineConfig:
 class RGBDPublisher(Node):
     """ROS 2 node that publishes RGB-D data for nvblox."""
 
-    def __init__(self, camera: LuxonisCameraSource, camera_index: int, frame_id: str | None = None):
+    def __init__(self, camera: LuxonisCameraSource, camera_index: int, frame_id: str | None = None) -> None:
         """Initialize the RGB-D publisher node.
 
         Args:
@@ -208,7 +214,7 @@ class RGBDPublisher(Node):
             # Node will be destroyed when thread exits
             pass
 
-    def publish_rgbd(self, rgb_frame, depth_frame) -> None:
+    def publish_rgbd(self, rgb_frame: CameraFrame, depth_frame: CameraFrame) -> None:
         """Publish RGB and depth frames.
 
         Args:
@@ -248,7 +254,7 @@ class RGBDPublisher(Node):
         depth_info = self._create_camera_info(self._depth_intrinsics, stamp)
         self._depth_info_pub.publish(depth_info)
 
-    def _create_camera_info(self, intrinsics, stamp: Time) -> CameraInfo:
+    def _create_camera_info(self, intrinsics: Intrinsics, stamp: Time) -> CameraInfo:
         """Create CameraInfo message from intrinsics."""
         info = CameraInfo()
         info.header.stamp = stamp
@@ -303,7 +309,9 @@ def load_config(config_path: Path) -> PipelineConfig:
     return PipelineConfig.from_dict(data)
 
 
-def create_sources(config: PipelineConfig) -> tuple[dict[str, LuxonisCameraSource], str | None, dict[str, LuxonisCameraSource]]:
+def create_sources(
+    config: PipelineConfig,
+) -> tuple[dict[str, LuxonisCameraSource], str | None, dict[str, LuxonisCameraSource]]:
     """Create camera sources directly from configuration.
 
     Returns:
@@ -337,10 +345,8 @@ def create_sources(config: PipelineConfig) -> tuple[dict[str, LuxonisCameraSourc
 
     for cam_config in config.cameras:
         # Map config fields to new resolution structure
-        mono_sensor_resolution = LuxonisResolution.from_dimensions(
-            cam_config.resolution[0], cam_config.resolution[1]
-        )
-        
+        mono_sensor_resolution = LuxonisResolution.from_dimensions(cam_config.resolution[0], cam_config.resolution[1])
+
         slam_output_resolution = None
         if cam_config.output_resolution is not None:
             slam_output_resolution = LuxonisResolution.from_dimensions(
@@ -357,13 +363,13 @@ def create_sources(config: PipelineConfig) -> tuple[dict[str, LuxonisCameraSourc
                 cam_config.rgb_sensor_resolution[0], cam_config.rgb_sensor_resolution[1]
             )
         # Will auto-select if None
-        
+
         rgb_output_resolution = None
         if cam_config.rgb_output_resolution is not None:
             rgb_output_resolution = LuxonisResolution.from_dimensions(
                 cam_config.rgb_output_resolution[0], cam_config.rgb_output_resolution[1]
             )
-        
+
         depth_input_resolution = None  # Defaults to mono_sensor_resolution
         depth_output_resolution = None  # Defaults to rgb_output_resolution when aligned
 
@@ -397,7 +403,9 @@ def create_sources(config: PipelineConfig) -> tuple[dict[str, LuxonisCameraSourc
         imu_status = " (IMU enabled)" if cam_config.ip == first_ip else ""
         stereo_status = "stereo" if cam_config.stereo else "mono"
         slam_status = " [SLAM]" if True else ""  # All cameras used for SLAM
-        nvblox_status = " [nvblox]" if cam_config.ip in nvblox_camera_ips and enable_rgbd and source.has_rgbd_streams else ""
+        nvblox_status = (
+            " [nvblox]" if cam_config.ip in nvblox_camera_ips and enable_rgbd and source.has_rgbd_streams else ""
+        )
         output_info = (
             f" -> {cam_config.output_resolution[0]}x{cam_config.output_resolution[1]}"
             if cam_config.output_resolution
@@ -439,7 +447,7 @@ def run(config: PipelineConfig) -> None:
     for i, cam in enumerate(config.cameras):
         stereo_str = "stereo" if cam.stereo else "mono"
         print(f"  Camera {i + 1}: {cam.ip} ({stereo_str}, {cam.resolution[0]}x{cam.resolution[1]}, {cam.sensor_type})")
-    
+
     if rgbd_cameras:
         print(f"\nCameras for nvblox ({len(rgbd_cameras)} camera(s)):")
         for i, (camera_ip, _) in enumerate(sorted(rgbd_cameras.items())):
@@ -447,7 +455,7 @@ def run(config: PipelineConfig) -> None:
             print(f"  nvblox Camera {i}: {camera_ip} (RGB-D, {cam.resolution[0]}x{cam.resolution[1]})")
     else:
         print("\nNo cameras configured for nvblox (set nvblox_cameras in config)")
-    
+
     print(f"\nFPS: {config.fps}")
     if config.urdf_path:
         print(f"URDF: {config.urdf_path}")
@@ -656,9 +664,11 @@ def run(config: PipelineConfig) -> None:
                 if rgbd_cameras:
                     fps_strs = [f"{ip}: {rgbd_fps_dict[ip]:4.1f}" for ip in rgbd_cameras.keys()]
                     rgbd_status = f" | RGB-D FPS: {', '.join(fps_strs)}"
-                print(
-                    f"Frames: {frame_count:5d} | FPS: {actual_fps:4.1f} | State: {state_str:12s} | Pos: {pos}{rgbd_status}"
+                status_msg = (
+                    f"Frames: {frame_count:5d} | FPS: {actual_fps:4.1f} | "
+                    f"State: {state_str:12s} | Pos: {pos}{rgbd_status}"
                 )
+                print(status_msg)
                 last_print = now
 
             if sync is None:
@@ -765,4 +775,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

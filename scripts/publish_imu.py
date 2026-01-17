@@ -3,10 +3,9 @@
 import argparse
 import signal
 import sys
-import time
+import traceback
 from typing import Optional
 
-import numpy as np
 import rclpy
 from builtin_interfaces.msg import Time
 from rclpy.node import Node
@@ -19,7 +18,7 @@ from thor_slam.camera.drivers.luxonis import LuxonisCameraConfig, LuxonisCameraS
 class IMUPublisher(Node):
     """ROS 2 node that publishes IMU data at a fixed frequency."""
 
-    def __init__(self, camera: LuxonisCameraSource, publish_rate: float, frame_id: str = "imu_link"):
+    def __init__(self, camera: LuxonisCameraSource, publish_rate: float, frame_id: str = "imu_link") -> None:
         """Initialize the IMU publisher node.
 
         Args:
@@ -46,7 +45,7 @@ class IMUPublisher(Node):
         """Timer callback to publish IMU data at fixed rate."""
         # Try to get latest IMU data (non-blocking)
         result = self._camera.try_get_timestamped_sensor_data()
-        
+
         # Handle return value (may be None or tuple due to bug in luxonis.py line 646)
         if result is None:
             # No data available, use latest if we have it
@@ -164,8 +163,6 @@ def main() -> None:
         print("Camera started successfully!")
     except Exception as e:
         print(f"Error starting camera: {e}")
-        import traceback
-
         traceback.print_exc()
         sys.exit(1)
 
@@ -181,7 +178,7 @@ def main() -> None:
     node = IMUPublisher(camera, args.rate, args.frame_id)
 
     # Setup signal handler for graceful shutdown
-    def signal_handler(sig, frame):
+    def signal_handler(sig: int, frame: object) -> None:
         print("\nShutting down...")
         node.destroy_node()
         rclpy.shutdown()
@@ -209,4 +206,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

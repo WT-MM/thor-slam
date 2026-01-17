@@ -1,14 +1,17 @@
+"""Calculate Allan deviation from IMU data in rosbag2 files."""
+
 import argparse
-import numpy as np
+
 import matplotlib.pyplot as plt
+import numpy as np
+from rosbags.rosbag2 import Reader  # type: ignore[import-not-found]
+from rosbags.typesys import Stores, get_typestore  # type: ignore[import-not-found]
 
-from rosbags.rosbag2 import Reader
-from rosbags.typesys import get_typestore, Stores
 
-def allan_dev_overlapping(x: np.ndarray, fs: float, num_taus: int = 60):
+def allan_dev_overlapping(x: np.ndarray, fs: float, num_taus: int = 60) -> tuple[np.ndarray, np.ndarray]:
     dt = 1.0 / fs
-    N = len(x)
-    m_max = max(1, N // 10)
+    n = len(x)
+    m_max = max(1, n // 10)
     m_vals = np.unique(np.logspace(0, np.log10(m_max), num_taus).astype(int))
     taus = m_vals * dt
 
@@ -22,37 +25,45 @@ def allan_dev_overlapping(x: np.ndarray, fs: float, num_taus: int = 60):
         adev[i] = np.sqrt(0.5 * np.mean(diffs * diffs))
     return taus, adev
 
-def fit_sigma_w(taus, adev, slope_target=-0.5, tol=0.12):
+
+def fit_sigma_w(
+    taus: np.ndarray, adev: np.ndarray, slope_target: float = -0.5, tol: float = 0.12
+) -> tuple[float | None, tuple[float, float] | None]:
     # white noise: adev ~ sigma_w / sqrt(2*tau)
     slopes = np.diff(np.log(adev)) / np.diff(np.log(taus))
     idx = np.where(np.abs(slopes - slope_target) < tol)[0]
     if len(idx) < 3:
         return None, None
     # use middle chunk
-    i0, i1 = idx[len(idx)//4], idx[3*len(idx)//4]
-    sel = slice(i0, i1+1)
+    i0, i1 = idx[len(idx) // 4], idx[3 * len(idx) // 4]
+    sel = slice(i0, i1 + 1)
     sigma_w = np.mean(adev[sel] * np.sqrt(2 * taus[sel]))
-    return sigma_w, (taus[i0], taus[i1+1])
+    return sigma_w, (taus[i0], taus[i1 + 1])
 
-def fit_sigma_b_rw(taus, adev, slope_target=+0.5, tol=0.12):
+
+def fit_sigma_b_rw(
+    taus: np.ndarray, adev: np.ndarray, slope_target: float = +0.5, tol: float = 0.12
+) -> tuple[float | None, tuple[float, float] | None]:
     # bias random walk: adev ~ sigma_b * sqrt(tau/3)
     slopes = np.diff(np.log(adev)) / np.diff(np.log(taus))
     idx = np.where(np.abs(slopes - slope_target) < tol)[0]
     if len(idx) < 3:
         return None, None
-    i0, i1 = idx[len(idx)//4], idx[3*len(idx)//4]
-    sel = slice(i0, i1+1)
+    i0, i1 = idx[len(idx) // 4], idx[3 * len(idx) // 4]
+    sel = slice(i0, i1 + 1)
     sigma_b = np.mean(adev[sel] * np.sqrt(3 / taus[sel]))
-    return sigma_b, (taus[i0], taus[i1+1])
+    return sigma_b, (taus[i0], taus[i1 + 1])
 
-def resample_uniform(t, y, fs):
+
+def resample_uniform(t: np.ndarray, y: np.ndarray, fs: float) -> tuple[np.ndarray, np.ndarray]:
     t0, t1 = t[0], t[-1]
     dt = 1.0 / fs
     tu = np.arange(t0, t1, dt)
     yu = np.interp(tu, t, y)
     return tu, yu
 
-def main():
+
+def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("bag", help="Path to rosbag2 folder (contains metadata.yaml)")
     ap.add_argument("--topic", default="/imu/data_raw")
@@ -62,9 +73,9 @@ def main():
 
     typestore = get_typestore(Stores.ROS2_JAZZY)
 
-    t_list = []
-    w = [[], [], []]
-    a = [[], [], []]
+    t_list: list[float] = []
+    w: list[list[float]] = [[], [], []]
+    a: list[list[float]] = [[], [], []]
 
     with Reader(args.bag) as reader:
         conns = [c for c in reader.connections if c.topic == args.topic]
@@ -77,11 +88,11 @@ def main():
             # Prefer header stamp (sensor time). Fall back to bag time if stamp is zero.
             sec = int(msg.header.stamp.sec)
             nsec = int(msg.header.stamp.nanosec)
-            t = sec + 1e-9 * nsec
-            if t == 0.0:
-                t = ts * 1e-9  # bag timestamp is in ns
+            timestamp = sec + 1e-9 * nsec
+            if timestamp == 0.0:
+                timestamp = ts * 1e-9  # bag timestamp is in ns
 
-            t_list.append(t)
+            t_list.append(timestamp)
 
             w[0].append(float(msg.angular_velocity.x))
             w[1].append(float(msg.angular_velocity.y))
@@ -91,9 +102,9 @@ def main():
             a[1].append(float(msg.linear_acceleration.y))
             a[2].append(float(msg.linear_acceleration.z))
 
-    t = np.asarray(t_list, dtype=float)
-    order = np.argsort(t)
-    t = t[order]
+    t_arr = np.asarray(t_list, dtype=float)
+    order = np.argsort(t_arr)
+    t: np.ndarray = t_arr[order]
     w = [np.asarray(ch, dtype=float)[order] for ch in w]
     a = [np.asarray(ch, dtype=float)[order] for ch in a]
 
@@ -116,7 +127,7 @@ def main():
 
     results = {}
 
-    def process(name, chans, units):
+    def process(name: str, chans: list[np.ndarray], units: str) -> None:
         nonlocal results
         print(f"\n=== {name} ({units}) ===")
         sig_w = []
@@ -132,16 +143,20 @@ def main():
 
             axis = "xyz"[i]
             print(f"Axis {axis}:")
-            if sigma_w is not None:
-                print(f"  noise_density ≈ {sigma_w:.6e}  ({units}/√Hz)   fit τ∈[{tau_rng_w[0]:.3g},{tau_rng_w[1]:.3g}] s")
+            if sigma_w is not None and tau_rng_w is not None:
+                print(
+                    f"  noise_density ≈ {sigma_w:.6e}  ({units}/√Hz)   fit τ∈[{tau_rng_w[0]:.3g},{tau_rng_w[1]:.3g}] s"
+                )
                 sig_w.append(sigma_w)
             else:
                 print("  noise_density: could not auto-detect −1/2 slope region")
 
-            if sigma_b is not None:
+            if sigma_b is not None and tau_rng_b is not None:
                 # units here are (units/s)/√Hz = units/(s*√Hz)
                 # for gyro units=rad/s => rad/s^2/√Hz; accel units=m/s^2 => m/s^3/√Hz
-                print(f"  random_walk   ≈ {sigma_b:.6e}  ({units}/s/√Hz)  fit τ∈[{tau_rng_b[0]:.3g},{tau_rng_b[1]:.3g}] s")
+                print(
+                    f"  random_walk   ≈ {sigma_b:.6e}  ({units}/s/√Hz)  fit τ∈[{tau_rng_b[0]:.3g},{tau_rng_b[1]:.3g}] s"
+                )
                 sig_b.append(sigma_b)
             else:
                 print("  random_walk: could not auto-detect +1/2 slope region (try longer log)")
@@ -170,6 +185,7 @@ def main():
     print(f"gyroscope_random_walk:        {results['gyro']['random_walk_avg']}")
     print(f"accelerometer_noise_density:  {results['accel']['noise_density_avg']}")
     print(f"accelerometer_random_walk:    {results['accel']['random_walk_avg']}")
+
 
 if __name__ == "__main__":
     main()

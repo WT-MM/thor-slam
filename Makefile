@@ -32,6 +32,7 @@ all:
 	@echo "  make isaac-ros-launch  - Launch Isaac ROS Visual SLAM"
 	@echo "  make slam-run          - Run camera bridge (SLAM only)"
 	@echo "  make pipeline-run     - Run camera bridge + RGB-D (for nvblox)"
+	@echo "  make odom-tf           - Publish map->odom TF transform"
 	@echo "  make nvblox-install   - Install nvblox (Isaac ROS)"
 	@echo "  make nvblox-launch    - Launch nvblox"
 	@echo "  make nvblox-rviz      - Launch RViz for nvblox"
@@ -99,6 +100,11 @@ slam-run:
 # Run the camera bridge with RGB-D publishing (for nvblox)
 pipeline-run:
 	python -m scripts.run_pipeline
+
+# Publish odom TF transform (run in separate terminal)
+odom-tf:
+	@echo "Publishing map->odom transform from visual SLAM odometry..."
+	python -m scripts.publish_odom_tf
 
 # ============================================ #
 #                 ROS2 Utils                   #

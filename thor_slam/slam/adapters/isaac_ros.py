@@ -14,7 +14,7 @@ import cv2
 import numpy as np
 import rclpy
 from builtin_interfaces.msg import Time
-from cv_bridge import CvBridge  # type: ignore[import-not-found]
+from cv_bridge import CvBridge  # type: ignore[import-untyped]
 from geometry_msgs.msg import TransformStamped
 from nav_msgs.msg import Odometry
 from rclpy.node import Node
@@ -205,7 +205,7 @@ class IsaacRosAdapter(SlamEngine):
                 [
                     [0, -1, 0, 0],  # x_rdf = -y_flu
                     [0, 0, -1, 0],  # y_rdf = -z_flu
-                    [1, 0, 0, 0],   # z_rdf = x_flu
+                    [1, 0, 0, 0],  # z_rdf = x_flu
                     [0, 0, 0, 1],
                 ]
             )
@@ -218,8 +218,12 @@ class IsaacRosAdapter(SlamEngine):
             transforms.append(t_optical)
 
         self._tf_broadcaster.sendTransform(transforms)
-        logger.info("Published TF: base_link -> camera_0..%d, camera_0..%d -> camera_0..%d_optical_frame", 
-                    len(self._cameras) - 1, len(self._cameras) - 1, len(self._cameras) - 1)
+        logger.info(
+            "Published TF: base_link -> camera_0..%d, camera_0..%d -> camera_0..%d_optical_frame",
+            len(self._cameras) - 1,
+            len(self._cameras) - 1,
+            len(self._cameras) - 1,
+        )
 
     def _publish_imu_tf(self) -> None:
         """Publish static TF from base_link to imu_link."""

@@ -8,6 +8,7 @@ Panels:
         - /Status1
         - /TSDF Map1
         - /Mesh1
+        - /Colored Voxels1
         - /Camera1
       Splitter Ratio: 0.5
     Tree Height: 523
@@ -80,8 +81,8 @@ Visualization Manager:
       Value: true
 
     - Class: rviz_default_plugins/PointCloud2
-      Name: Point Cloud
-      Enabled: true
+      Name: ESDF Point Cloud
+      Enabled: false
       Alpha: 1
       Autocompute Intensity Bounds: true
       Autocompute Value Bounds:
@@ -109,6 +110,38 @@ Visualization Manager:
         Reliability Policy: Reliable
       Use Timestamp: false
       Use rainbow: true
+      Value: true
+
+    - Class: rviz_default_plugins/PointCloud2
+      Name: Colored Voxels
+      Enabled: true
+      Alpha: 1
+      Autocompute Intensity Bounds: true
+      Autocompute Value Bounds:
+        Max Value: 10
+        Min Value: -10
+        Value: true
+      Axis: Z
+      Channel Name: rgb
+      Color: 255; 255; 255
+      Color Transformer: RGB8
+      Decay Time: 0
+      Invert Rainbow: false
+      Max Color: 255; 255; 255
+      Min Color: 0; 0; 0
+      Position Transformer: XYZ
+      Selectable: true
+      Size (Pixels): 2
+      Size (m): 0.01
+      Style: Points
+      Topic:
+        Value: /nvblox_node/color_layer
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+      Use Timestamp: false
+      Use rainbow: false
       Value: true
 
     - Class: rviz_default_plugins/TF

@@ -92,7 +92,7 @@ class LuxonisResolution:
 @dataclass
 class LuxonisCameraConfig:
     """Configuration for Luxonis cameras.
-    
+
     Supports independent resolutions for SLAM stereo output and RGB-D nvblox output.
     """
 
@@ -114,7 +114,7 @@ class LuxonisCameraConfig:
     mono_sensor_resolution: LuxonisResolution | None = None  # Actual CAM_B/C sensor mode for depth quality
     slam_output_resolution: LuxonisResolution | None = None  # Published resolution for SLAM left/right
     depth_input_resolution: LuxonisResolution | None = None  # Optional: resize mono frames to this before StereoDepth
-    
+
     # Backward compatibility: 'output_resolution' maps to slam_output_resolution
     output_resolution: LuxonisResolution | None = None  # DEPRECATED: use slam_output_resolution
 
@@ -122,11 +122,13 @@ class LuxonisCameraConfig:
     enable_rgbd: bool = False
     rgb_sensor_resolution: LuxonisResolution | None = None  # Actual CAM_A sensor mode (auto-selected if None)
     rgb_output_resolution: LuxonisResolution | None = None  # Published RGB resolution for nvblox
-    depth_output_resolution: LuxonisResolution | None = None  # Published depth resolution (must match rgb_output if aligned)
-    
+    depth_output_resolution: LuxonisResolution | None = (
+        None  # Published depth resolution (must match rgb_output if aligned)
+    )
+
     # Backward compatibility: 'rgb_resolution' maps to rgb_sensor_resolution
     rgb_resolution: LuxonisResolution | None = None  # DEPRECATED: use rgb_sensor_resolution
-    
+
     rgbd_sync: bool = True  # Provide a synced RGB+depth stream via Sync node
     rgbd_sync_threshold_ms: int = 50
     rgbd_sync_attempts: int = 10
@@ -137,21 +139,21 @@ class LuxonisCameraConfig:
     depth_subpixel: bool = False
     depth_extended_disparity: bool = False
     depth_align_to_rgb: bool = True  # If True, aligns depth to CAM_A (depth_output must match rgb_output)
-    
+
     def __post_init__(self) -> None:
         """Normalize config fields for backward compatibility."""
         # Map deprecated 'resolution' to mono_sensor_resolution
         if self.resolution is not None and self.mono_sensor_resolution is None:
             self.mono_sensor_resolution = self.resolution
-        
+
         # Map deprecated 'output_resolution' to slam_output_resolution
         if self.output_resolution is not None and self.slam_output_resolution is None:
             self.slam_output_resolution = self.output_resolution
-        
+
         # Map deprecated 'rgb_resolution' to rgb_sensor_resolution
         if self.rgb_resolution is not None and self.rgb_sensor_resolution is None:
             self.rgb_sensor_resolution = self.rgb_resolution
-        
+
         # Ensure mono_sensor_resolution is set (required)
         if self.mono_sensor_resolution is None:
             raise ValueError("mono_sensor_resolution (or legacy 'resolution') must be set")
@@ -187,9 +189,11 @@ class LuxonisCameraSource(CameraSource):
 
         # Validate mono sensor resolution for stereo cameras
         if self.cfg.stereo:
+            if self.cfg.mono_sensor_resolution is None:
+                raise ValueError("mono_sensor_resolution must be set")
             mono_sensor_res = self.cfg.mono_sensor_resolution.as_tuple()
             sockets_to_check = [dai.CameraBoardSocket.CAM_B, dai.CameraBoardSocket.CAM_C]
-            
+
             resolution_valid = False
             mode_valid = False
             for socket in sockets_to_check:
@@ -226,17 +230,19 @@ class LuxonisCameraSource(CameraSource):
                 raise ExceptionGroup("Invalid camera configuration", errors) from errors[0]
         else:
             # Single camera mode - validate CAM_A
+            if self.cfg.mono_sensor_resolution is None:
+                raise ValueError("mono_sensor_resolution must be set")
             mono_sensor_res = self.cfg.mono_sensor_resolution.as_tuple()
             valid_resolutions = get_luxonis_camera_valid_resolutions(self.device, dai.CameraBoardSocket.CAM_A)
             valid_modes = get_luxonis_camera_valid_modes(self.device, dai.CameraBoardSocket.CAM_A)
-            
+
             if mono_sensor_res not in valid_resolutions:
                 supported = [f"{w}x{h}" for w, h in valid_resolutions]
                 raise ValueError(
                     f"Mono sensor resolution {mono_sensor_res} not supported for device {self.ip}. "
                     f"Supported resolutions: {', '.join(supported)}"
                 )
-            
+
             if camera_sensor_type_to_dai[self.cfg.camera_mode] not in valid_modes:
                 raise ValueError(
                     f"Camera mode {self.cfg.camera_mode} not supported for device {self.ip}. "
@@ -279,14 +285,16 @@ class LuxonisCameraSource(CameraSource):
                 # Auto-select a valid color sensor resolution
                 # If rgb_output_resolution is specified, prefer sensor resolutions that can support it
                 rgb_output_res = self.cfg.rgb_output_resolution.as_tuple() if self.cfg.rgb_output_resolution else None
+                if self.cfg.mono_sensor_resolution is None:
+                    raise ValueError("mono_sensor_resolution must be set")
                 mono_res = self.cfg.mono_sensor_resolution.as_tuple()
-                
+
                 best_res = None
-                best_score = float('inf')
-                
+                best_score = float("inf")
+
                 for res in rgb_valid_resolutions:
                     score = 0.0
-                    
+
                     # Prefer resolutions that can support the desired output (sensor >= output)
                     if rgb_output_res is not None:
                         # Prefer sensor resolutions >= output resolution
@@ -301,41 +309,46 @@ class LuxonisCameraSource(CameraSource):
                         pixel_diff = abs(res[0] * res[1] - mono_res[0] * mono_res[1])
                         aspect_ratio_diff = abs((res[0] / res[1]) - (mono_res[0] / mono_res[1]))
                         score = pixel_diff + aspect_ratio_diff * 10000
-                    
+
                     if score < best_score:
                         best_score = score
                         best_res = res
-                
+
                 if best_res is None:
                     # Fallback: use smallest resolution
                     best_res = min(rgb_valid_resolutions, key=lambda r: r[0] * r[1])
-                
+
                 rgb_sensor_res = best_res
                 # Store the auto-selected resolution for use in pipeline building
                 self._auto_rgb_sensor_resolution = LuxonisResolution(width=rgb_sensor_res[0], height=rgb_sensor_res[1])
-                import logging
-                logger = logging.getLogger(__name__)
                 logger.info(
-                    f"Auto-selected RGB sensor resolution for {self.ip}: {rgb_sensor_res} "
-                    f"(output: {rgb_output_res if rgb_output_res else 'not specified'})"
+                    "Auto-selected RGB sensor resolution for %s: %s (output: %s)",
+                    self.ip,
+                    rgb_sensor_res,
+                    rgb_output_res if rgb_output_res else "not specified",
                 )
 
             # Validate RGB output resolution is set
             if self.cfg.rgb_output_resolution is None:
                 # Default to RGB sensor resolution if not specified
-                rgb_output_res = self.cfg.rgb_sensor_resolution or self._auto_rgb_sensor_resolution
-                if rgb_output_res is None:
+                rgb_output_res_cfg = self.cfg.rgb_sensor_resolution or self._auto_rgb_sensor_resolution
+                if rgb_output_res_cfg is None:
                     raise ValueError("rgb_output_resolution must be set when enable_rgbd=True")
-                self.cfg.rgb_output_resolution = rgb_output_res
+                if not isinstance(rgb_output_res_cfg, LuxonisResolution):
+                    raise ValueError("rgb_output_resolution must be LuxonisResolution")
+                self.cfg.rgb_output_resolution = rgb_output_res_cfg
 
             # Validate depth output resolution
             if self.cfg.depth_align_to_rgb:
                 # When aligned, depth output must match RGB output
                 if self.cfg.depth_output_resolution is not None:
+                    if self.cfg.rgb_output_resolution is None:
+                        raise ValueError("rgb_output_resolution must be set when depth_align_to_rgb=True")
                     if self.cfg.depth_output_resolution.as_tuple() != self.cfg.rgb_output_resolution.as_tuple():
                         raise ValueError(
-                            f"When depth_align_to_rgb=True, depth_output_resolution ({self.cfg.depth_output_resolution}) "
-                            f"must match rgb_output_resolution ({self.cfg.rgb_output_resolution})"
+                            "When depth_align_to_rgb=True, depth_output_resolution (%s) "
+                            "must match rgb_output_resolution (%s)"
+                            % (self.cfg.depth_output_resolution, self.cfg.rgb_output_resolution)
                         )
                 else:
                     # Auto-set to match RGB output
@@ -345,7 +358,7 @@ class LuxonisCameraSource(CameraSource):
         if self.cfg.slam_output_resolution is None:
             # Default to mono sensor resolution if not specified
             self.cfg.slam_output_resolution = self.cfg.mono_sensor_resolution
-        
+
         # Set depth input resolution default
         if self.cfg.depth_input_resolution is None:
             # Default to mono sensor resolution (use full res for depth)
@@ -360,9 +373,9 @@ class LuxonisCameraSource(CameraSource):
         # Initialize intrinsics and extrinsics
         self._intrinsics: list[Intrinsics] | None = None
         self._extrinsics: list[Extrinsics] | None = None
-        
+
         # Initialize auto-selected RGB sensor resolution (set above if enable_rgbd, otherwise None)
-        if not hasattr(self, '_auto_rgb_sensor_resolution'):
+        if not hasattr(self, "_auto_rgb_sensor_resolution"):
             self._auto_rgb_sensor_resolution = None
 
     def _build_and_start_pipeline(self) -> None:
@@ -371,6 +384,12 @@ class LuxonisCameraSource(CameraSource):
         self._pipeline = dai.Pipeline(self.device)
 
         # Get resolution tuples
+        if self.cfg.mono_sensor_resolution is None:
+            raise ValueError("mono_sensor_resolution must be set")
+        if self.cfg.slam_output_resolution is None:
+            raise ValueError("slam_output_resolution must be set")
+        if self.cfg.depth_input_resolution is None:
+            raise ValueError("depth_input_resolution must be set")
         mono_sensor_res = self.cfg.mono_sensor_resolution.as_tuple()
         slam_output_res = self.cfg.slam_output_resolution.as_tuple()
         depth_input_res = self.cfg.depth_input_resolution.as_tuple()
@@ -380,16 +399,20 @@ class LuxonisCameraSource(CameraSource):
         rgb_sensor_res = None
         rgb_output_res = None
         depth_output_res = None
-        
+
         if self.cfg.enable_rgbd:
             # Get RGB sensor resolution (explicit or auto-selected)
             if self.cfg.rgb_sensor_resolution is not None:
                 rgb_sensor_res = self.cfg.rgb_sensor_resolution.as_tuple()
-            elif hasattr(self, '_auto_rgb_sensor_resolution') and self._auto_rgb_sensor_resolution is not None:
+            elif hasattr(self, "_auto_rgb_sensor_resolution") and self._auto_rgb_sensor_resolution is not None:
                 rgb_sensor_res = self._auto_rgb_sensor_resolution.as_tuple()
             else:
                 raise RuntimeError("RGB sensor resolution not determined (should have been set in __init__)")
-            
+
+            if self.cfg.rgb_output_resolution is None:
+                raise ValueError("rgb_output_resolution must be set when enable_rgbd=True")
+            if self.cfg.depth_output_resolution is None:
+                raise ValueError("depth_output_resolution must be set when enable_rgbd=True")
             rgb_output_res = self.cfg.rgb_output_resolution.as_tuple()
             depth_output_res = self.cfg.depth_output_resolution.as_tuple()
 
@@ -410,7 +433,7 @@ class LuxonisCameraSource(CameraSource):
                 left_slam_out = left_cam.requestOutput(size=slam_output_res, resizeMode=resize_mode, fps=fps)
             else:
                 left_slam_out = left_cam.requestOutput(size=slam_output_res, fps=fps)
-            
+
             self._output_queues["left"] = left_slam_out.createOutputQueue(
                 maxSize=self.cfg.queue_size, blocking=self.cfg.queue_blocking
             )
@@ -429,7 +452,7 @@ class LuxonisCameraSource(CameraSource):
                 right_slam_out = right_cam.requestOutput(size=slam_output_res, resizeMode=resize_mode, fps=fps)
             else:
                 right_slam_out = right_cam.requestOutput(size=slam_output_res, fps=fps)
-            
+
             self._output_queues["right"] = right_slam_out.createOutputQueue(
                 maxSize=self.cfg.queue_size, blocking=self.cfg.queue_blocking
             )
@@ -451,13 +474,14 @@ class LuxonisCameraSource(CameraSource):
                     right_depth_in = right_cam.requestOutput(size=depth_input_res, resizeMode=resize_mode, fps=fps)
 
                 # RGB camera (CAM_A)
-                import logging
-                logger = logging.getLogger(__name__)
                 logger.info(
-                    f"RGB-D config for {self.ip}: rgb_sensor={rgb_sensor_res}, "
-                    f"rgb_output={rgb_output_res}, depth_output={depth_output_res}"
+                    "RGB-D config for %s: rgb_sensor=%s, rgb_output=%s, depth_output=%s",
+                    self.ip,
+                    rgb_sensor_res,
+                    rgb_output_res,
+                    depth_output_res,
                 )
-                
+
                 rgb_cam = self._pipeline.create(dai.node.Camera)
                 rgb_cam.setSensorType(dai.CameraSensorType.COLOR)
                 try:
@@ -477,14 +501,14 @@ class LuxonisCameraSource(CameraSource):
                         # Get the actual selected resolution for intrinsics
                         # Note: DepthAI v3 doesn't expose this directly, so we'll use rgb_output_res for intrinsics
                 except Exception as e:
-                    raise RuntimeError(
-                        f"Failed to build RGB camera (CAM_A) for {self.ip}: {e}"
-                    ) from e
+                    raise RuntimeError(f"Failed to build RGB camera (CAM_A) for {self.ip}: {e}") from e
 
                 try:
                     if rgb_output_res != rgb_sensor_res:
                         # Request resized output
-                        rgb_out = rgb_cam.requestOutput(size=rgb_output_res, resizeMode=resize_mode, fps=fps)
+                        rgb_out = rgb_cam.requestOutput(
+                            size=cast(tuple[int, int], rgb_output_res), resizeMode=resize_mode, fps=fps
+                        )
                     else:
                         # Use full resolution output when output size matches sensor resolution
                         rgb_out = rgb_cam.requestFullResolutionOutput()
@@ -510,10 +534,11 @@ class LuxonisCameraSource(CameraSource):
                 stereo.setLeftRightCheck(self.cfg.depth_lr_check)
                 stereo.setSubpixel(self.cfg.depth_subpixel)
                 stereo.setExtendedDisparity(self.cfg.depth_extended_disparity)
-                
+
                 if self.cfg.depth_align_to_rgb:
                     stereo.setDepthAlign(dai.CameraBoardSocket.CAM_A)
                     # ALWAYS set output size when aligned to avoid expensive upscaling
+                    assert depth_output_res is not None
                     stereo.setOutputSize(depth_output_res[0], depth_output_res[1])
                 elif depth_output_res is not None:
                     stereo.setOutputSize(depth_output_res[0], depth_output_res[1])
@@ -591,16 +616,18 @@ class LuxonisCameraSource(CameraSource):
         intrinsics_list: list[Intrinsics] = []
 
         # Use SLAM output resolution (what we publish for SLAM)
+        if self.cfg.slam_output_resolution is None:
+            raise ValueError("slam_output_resolution must be set")
+        if self.cfg.mono_sensor_resolution is None:
+            raise ValueError("mono_sensor_resolution must be set")
         slam_output = self.cfg.slam_output_resolution
         mono_sensor = self.cfg.mono_sensor_resolution
-        
+
         # Get intrinsics at sensor resolution, then scale to output
         if self.cfg.stereo:
             # Left camera (CAM_B)
-            left_matrix = np.array(
-                self._calib_data.getCameraIntrinsics(
-                    dai.CameraBoardSocket.CAM_B, mono_sensor.width, mono_sensor.height
-                )
+            left_matrix: np.ndarray = np.array(
+                self._calib_data.getCameraIntrinsics(dai.CameraBoardSocket.CAM_B, mono_sensor.width, mono_sensor.height)
             )
             # Scale to SLAM output resolution
             scale_x = slam_output.width / mono_sensor.width
@@ -613,14 +640,14 @@ class LuxonisCameraSource(CameraSource):
 
             left_coeffs = np.array(self._calib_data.getDistortionCoefficients(dai.CameraBoardSocket.CAM_B))
             intrinsics_list.append(
-                Intrinsics(width=slam_output.width, height=slam_output.height, matrix=left_matrix_scaled, coeffs=left_coeffs)
+                Intrinsics(
+                    width=slam_output.width, height=slam_output.height, matrix=left_matrix_scaled, coeffs=left_coeffs
+                )
             )
 
             # Right camera (CAM_C)
-            right_matrix = np.array(
-                self._calib_data.getCameraIntrinsics(
-                    dai.CameraBoardSocket.CAM_C, mono_sensor.width, mono_sensor.height
-                )
+            right_matrix: np.ndarray = np.array(
+                self._calib_data.getCameraIntrinsics(dai.CameraBoardSocket.CAM_C, mono_sensor.width, mono_sensor.height)
             )
             right_matrix_scaled = right_matrix.copy()
             right_matrix_scaled[0, 0] *= scale_x
@@ -630,14 +657,14 @@ class LuxonisCameraSource(CameraSource):
 
             right_coeffs = np.array(self._calib_data.getDistortionCoefficients(dai.CameraBoardSocket.CAM_C))
             intrinsics_list.append(
-                Intrinsics(width=slam_output.width, height=slam_output.height, matrix=right_matrix_scaled, coeffs=right_coeffs)
+                Intrinsics(
+                    width=slam_output.width, height=slam_output.height, matrix=right_matrix_scaled, coeffs=right_coeffs
+                )
             )
         else:
             # Single camera (CAM_A)
-            rgb_matrix = np.array(
-                self._calib_data.getCameraIntrinsics(
-                    dai.CameraBoardSocket.CAM_A, mono_sensor.width, mono_sensor.height
-                )
+            rgb_matrix: np.ndarray = np.array(
+                self._calib_data.getCameraIntrinsics(dai.CameraBoardSocket.CAM_A, mono_sensor.width, mono_sensor.height)
             )
             scale_x = slam_output.width / mono_sensor.width
             scale_y = slam_output.height / mono_sensor.height
@@ -649,7 +676,9 @@ class LuxonisCameraSource(CameraSource):
 
             rgb_coeffs = np.array(self._calib_data.getDistortionCoefficients(dai.CameraBoardSocket.CAM_A))
             intrinsics_list.append(
-                Intrinsics(width=slam_output.width, height=slam_output.height, matrix=rgb_matrix_scaled, coeffs=rgb_coeffs)
+                Intrinsics(
+                    width=slam_output.width, height=slam_output.height, matrix=rgb_matrix_scaled, coeffs=rgb_coeffs
+                )
             )
 
         self._intrinsics = intrinsics_list
@@ -871,20 +900,20 @@ class LuxonisCameraSource(CameraSource):
         if self.cfg.rgbd_sync and "rgbd" in self._output_queues:
             # Use synced RGB-D stream
             rgbd_group = self._output_queues["rgbd"].get()
-            rgb_data = rgbd_group["rgb"]
-            depth_data = rgbd_group["depth"]
+            rgb_data = rgbd_group["rgb"]  # type: ignore[index]
+            depth_data = rgbd_group["depth"]  # type: ignore[index]
         else:
             # Get RGB and depth separately
             rgb_data = self._output_queues["rgb"].get()
             depth_data = self._output_queues["depth"].get()
 
-        rgb_frame = rgb_data.getCvFrame()  # type: ignore[attr-defined]
-        rgb_timestamp = rgb_data.getTimestamp()  # type: ignore[attr-defined]
-        rgb_seq = rgb_data.getSequenceNum()  # type: ignore[attr-defined]
+        rgb_frame = rgb_data.getCvFrame()
+        rgb_timestamp = rgb_data.getTimestamp()
+        rgb_seq = rgb_data.getSequenceNum()
 
-        depth_frame = depth_data.getCvFrame()  # type: ignore[attr-defined]
-        depth_timestamp = depth_data.getTimestamp()  # type: ignore[attr-defined]
-        depth_seq = depth_data.getSequenceNum()  # type: ignore[attr-defined]
+        depth_frame = depth_data.getCvFrame()
+        depth_timestamp = depth_data.getTimestamp()
+        depth_seq = depth_data.getSequenceNum()
 
         return (
             CameraFrame(
@@ -918,8 +947,8 @@ class LuxonisCameraSource(CameraSource):
             rgbd_group = self._output_queues["rgbd"].tryGet()
             if rgbd_group is None:
                 return None
-            rgb_data = rgbd_group["rgb"]
-            depth_data = rgbd_group["depth"]
+            rgb_data = rgbd_group["rgb"]  # type: ignore[index]
+            depth_data = rgbd_group["depth"]  # type: ignore[index]
         else:
             # Get RGB and depth separately
             rgb_data = self._output_queues["rgb"].tryGet()
@@ -927,13 +956,13 @@ class LuxonisCameraSource(CameraSource):
             if rgb_data is None or depth_data is None:
                 return None
 
-        rgb_frame = rgb_data.getCvFrame()  # type: ignore[attr-defined]
-        rgb_timestamp = rgb_data.getTimestamp()  # type: ignore[attr-defined]
-        rgb_seq = rgb_data.getSequenceNum()  # type: ignore[attr-defined]
+        rgb_frame = rgb_data.getCvFrame()
+        rgb_timestamp = rgb_data.getTimestamp()
+        rgb_seq = rgb_data.getSequenceNum()
 
-        depth_frame = depth_data.getCvFrame()  # type: ignore[attr-defined]
-        depth_timestamp = depth_data.getTimestamp()  # type: ignore[attr-defined]
-        depth_seq = depth_data.getSequenceNum()  # type: ignore[attr-defined]
+        depth_frame = depth_data.getCvFrame()
+        depth_timestamp = depth_data.getTimestamp()
+        depth_seq = depth_data.getSequenceNum()
 
         return (
             CameraFrame(
@@ -962,11 +991,15 @@ class LuxonisCameraSource(CameraSource):
         # Get RGB sensor and output resolutions
         if self.cfg.rgb_sensor_resolution is not None:
             rgb_sensor_res = self.cfg.rgb_sensor_resolution
-        elif hasattr(self, '_auto_rgb_sensor_resolution') and self._auto_rgb_sensor_resolution is not None:
+        elif hasattr(self, "_auto_rgb_sensor_resolution") and self._auto_rgb_sensor_resolution is not None:
             rgb_sensor_res = self._auto_rgb_sensor_resolution
         else:
             raise RuntimeError("RGB sensor resolution not determined")
-        
+
+        if self.cfg.rgb_output_resolution is None:
+            raise ValueError("rgb_output_resolution must be set when enable_rgbd=True")
+        if self.cfg.depth_output_resolution is None:
+            raise ValueError("depth_output_resolution must be set when enable_rgbd=True")
         rgb_output_res = self.cfg.rgb_output_resolution
         depth_output_res = self.cfg.depth_output_resolution
 
@@ -994,18 +1027,20 @@ class LuxonisCameraSource(CameraSource):
                 # Scale RGB intrinsics to depth output resolution (shouldn't happen if validation passed)
                 depth_scale_from_rgb_x = depth_output_res.width / rgb_output_res.width
                 depth_scale_from_rgb_y = depth_output_res.height / rgb_output_res.height
-                depth_matrix = rgb_matrix_scaled.copy()
-                depth_matrix[0, 0] *= depth_scale_from_rgb_x
-                depth_matrix[1, 1] *= depth_scale_from_rgb_y
-                depth_matrix[0, 2] *= depth_scale_from_rgb_x
-                depth_matrix[1, 2] *= depth_scale_from_rgb_y
+                depth_matrix_final = rgb_matrix_scaled.copy()
+                depth_matrix_final[0, 0] *= depth_scale_from_rgb_x
+                depth_matrix_final[1, 1] *= depth_scale_from_rgb_y
+                depth_matrix_final[0, 2] *= depth_scale_from_rgb_x
+                depth_matrix_final[1, 2] *= depth_scale_from_rgb_y
             else:
-                depth_matrix = rgb_matrix_scaled.copy()
+                depth_matrix_final = rgb_matrix_scaled.copy()
             depth_coeffs = rgb_coeffs.copy()
         else:
             # Not aligned: use left camera (CAM_B) intrinsics at depth output resolution
+            if self.cfg.mono_sensor_resolution is None:
+                raise ValueError("mono_sensor_resolution must be set")
             mono_sensor_res = self.cfg.mono_sensor_resolution
-            depth_matrix = np.array(
+            depth_matrix: np.ndarray = np.array(
                 self._calib_data.getCameraIntrinsics(
                     dai.CameraBoardSocket.CAM_B, mono_sensor_res.width, mono_sensor_res.height
                 )
@@ -1017,7 +1052,7 @@ class LuxonisCameraSource(CameraSource):
             depth_matrix_scaled[1, 1] *= depth_scale_y
             depth_matrix_scaled[0, 2] *= depth_scale_x
             depth_matrix_scaled[1, 2] *= depth_scale_y
-            depth_matrix = depth_matrix_scaled
+            depth_matrix_final = depth_matrix_scaled
             depth_coeffs = np.array(self._calib_data.getDistortionCoefficients(dai.CameraBoardSocket.CAM_B))
 
         return (
@@ -1030,7 +1065,7 @@ class LuxonisCameraSource(CameraSource):
             Intrinsics(
                 width=depth_output_res.width,
                 height=depth_output_res.height,
-                matrix=depth_matrix,
+                matrix=depth_matrix_final,
                 coeffs=depth_coeffs,
             ),
         )
