@@ -14,7 +14,7 @@ import cv2
 import numpy as np
 import rclpy
 from builtin_interfaces.msg import Time
-from cv_bridge import CvBridge  # type: ignore[import-untyped]
+from cv_bridge import CvBridge
 from geometry_msgs.msg import TransformStamped
 from nav_msgs.msg import Odometry
 from rclpy.node import Node

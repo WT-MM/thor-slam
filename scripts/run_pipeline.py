@@ -33,7 +33,7 @@ import numpy as np
 import rclpy
 import yaml
 from builtin_interfaces.msg import Time
-from cv_bridge import CvBridge  # type: ignore[import-untyped]
+from cv_bridge import CvBridge
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import CameraInfo, Image
