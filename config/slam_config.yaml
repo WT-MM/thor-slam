@@ -6,28 +6,35 @@ cameras:
     stereo: true
     resolution: [640, 400]
     sensor_type: "MONO"
+    enable_rgbd: true
+    rgb_output_resolution: [1280, 800]
+    rgb_sensor_resolution: [1280, 800]
     # output_resolution: [640, 400]  # Optional: scale output to this resolution
   
-  # Camera 2: Left cam
-  - ip: "192.168.2.22"
-    stereo: true
-    resolution: [640, 400]
-    sensor_type: "MONO"
+  # # Camera 2: Left cam
+  # - ip: "192.168.2.22"
+  #   stereo: true
+  #   resolution: [640, 400]
+  #   sensor_type: "MONO"
     # output_resolution: [640, 400]  # Optional: scale output to this resolution
   
 # Camera 3: Up cam
-  - ip: "192.168.2.23"
-    stereo: true
-    resolution: [1920, 1200]
-    sensor_type: "COLOR"
-    output_resolution: [640, 400]  # Optional: scale output to this resolution (e.g., from 1920x1200 to 1280x800)
+  # - ip: "192.168.2.23"
+  #   stereo: true
+  #   resolution: [1920, 1200]  # Stereo camera resolution
+  #   sensor_type: "COLOR"
+  #   output_resolution: [640, 400]  # Optional: scale stereo output to this resolution
+  #   # rgb_output_resolution: [1280, 720]  # Optional: RGB output resolution for RGB-D (if enable_rgbd=true)
   
   # Camera 4: Front low cam
   - ip: "192.168.2.25"
     stereo: true
-    resolution: [640, 400]
+    resolution: [640, 400]  # Stereo camera resolution
     sensor_type: "MONO"
-    # output_resolution: [640, 400]  # Optional: scale output to this resolution
+    enable_rgbd: true
+    # output_resolution: [640, 400]  # Optional: scale stereo output to this resolution
+    rgb_sensor_resolution: [1280, 800]  # RGB sensor resolution (CAM_A) - should be >= rgb_output_resolution
+    rgb_output_resolution: [1280, 800]  # RGB output resolution for RGB-D (independent from stereo resolution)
 
 # Frame rate for all cameras
 fps: 30
@@ -46,4 +53,26 @@ queue_size: 8
 
 # Rig synchronization queue size
 rig_queue_size: 10
+
+# ============================================ #
+#              nvblox Configuration            #
+# ============================================ #
+
+# Specify which cameras to use for nvblox RGB-D publishing
+# All cameras above are used for SLAM, but only cameras listed here
+# will publish RGB-D data for nvblox
+# 
+# Option 1: Explicitly list camera IPs for nvblox
+nvblox_cameras:
+  - "192.168.2.25"  # Front low cam
+  # - "192.168.2.21"  # Right cam
+
+# Option 2: Use enable_rgbd per camera (alternative to nvblox_cameras)
+# If nvblox_cameras is not specified, cameras with enable_rgbd: true will be used
+# Example:
+#   - ip: "192.168.2.23"
+#     stereo: true
+#     resolution: [640, 400]  # Stereo camera resolution
+#     enable_rgbd: true  # This camera will be used for nvblox
+#     rgb_output_resolution: [1280, 720]  # RGB output for RGB-D (can differ from stereo resolution)
 

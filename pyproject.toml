@@ -32,7 +32,7 @@ namespace_packages = false
 
 # Uncomment to exclude modules from Mypy.
 [[tool.mypy.overrides]]
-module = ["geometry_msgs.*", "nav_msgs.*", "sensor_msgs.*", "tf2_ros", "rclpy.*", "rclpy", "builtin_interfaces.*"]
+module = ["geometry_msgs.*", "nav_msgs.*", "sensor_msgs.*", "tf2_ros", "rclpy.*", "rclpy", "builtin_interfaces.*", "cv_bridge"]
 ignore_missing_imports = true
 
 [tool.isort]
