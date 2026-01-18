@@ -41,8 +41,8 @@ from sensor_msgs.msg import CameraInfo, Image
 from thor_slam.camera.drivers.luxonis import (
     LuxonisCameraConfig,
     LuxonisCameraSource,
-    LuxonisRGBDCameraConfig,
     LuxonisResolution,
+    LuxonisRGBDCameraConfig,
 )
 from thor_slam.camera.rig import CameraRig
 from thor_slam.camera.types import CameraFrame, CameraSensorType, Extrinsics, IMUExtrinsics, Intrinsics
@@ -310,6 +310,50 @@ def load_config(config_path: Path) -> PipelineConfig:
     return PipelineConfig.from_dict(data)
 
 
+def create_rgbd_config(cam_config: CameraConfig, mono_sensor_resolution: LuxonisResolution) -> LuxonisRGBDCameraConfig:
+    """Create RGB-D camera configuration for a camera.
+
+    Args:
+        cam_config: Camera configuration from pipeline config.
+        mono_sensor_resolution: Mono sensor resolution (for depth input).
+
+    Returns:
+        RGB-D camera configuration.
+    """
+    # RGB sensor resolution (optional - auto-selected if None)
+    rgb_sensor_resolution = None
+    if cam_config.rgb_sensor_resolution is not None:
+        rgb_sensor_resolution = LuxonisResolution.from_dimensions(
+            cam_config.rgb_sensor_resolution[0], cam_config.rgb_sensor_resolution[1]
+        )
+
+    # RGB output resolution (optional - defaults to sensor resolution if None)
+    rgb_output_resolution = None
+    if cam_config.rgb_output_resolution is not None:
+        rgb_output_resolution = LuxonisResolution.from_dimensions(
+            cam_config.rgb_output_resolution[0], cam_config.rgb_output_resolution[1]
+        )
+
+    # Depth input resolution: use mono sensor resolution (full res for best depth quality)
+    # This will be set as default in LuxonisCameraSource.__init__ if None, but we set it explicitly for clarity
+    depth_input_resolution = mono_sensor_resolution
+
+    # Depth output resolution: will match RGB output when aligned (set in __init__)
+    # We leave it as None here - it will be auto-set to match rgb_output_resolution when depth_align_to_rgb=True
+    depth_output_resolution = None
+
+    return LuxonisRGBDCameraConfig(
+        enable_rgbd=True,
+        depth_input_resolution=depth_input_resolution,
+        rgb_sensor_resolution=rgb_sensor_resolution,
+        rgb_output_resolution=rgb_output_resolution,
+        depth_output_resolution=depth_output_resolution,
+        depth_preset=dai.node.StereoDepth.PresetMode.HIGH_DETAIL,
+        depth_lr_check=True,
+        depth_align_to_rgb=True,
+    )
+
+
 def create_sources(
     config: PipelineConfig,
 ) -> tuple[dict[str, LuxonisCameraSource], str | None, dict[str, LuxonisCameraSource]]:
@@ -344,6 +388,13 @@ def create_sources(
             f"Available cameras: {sorted(all_camera_ips)}"
         )
 
+    # Validate that nvblox cameras are stereo (RGB-D requires stereo)
+    non_stereo_nvblox = [cam.ip for cam in config.cameras if cam.ip in nvblox_camera_ips and not cam.stereo]
+    if non_stereo_nvblox:
+        raise ValueError(
+            f"RGB-D requires stereo cameras, but these nvblox cameras are not stereo: {sorted(non_stereo_nvblox)}"
+        )
+
     for cam_config in config.cameras:
         # Map config fields to new resolution structure
         mono_sensor_resolution = LuxonisResolution.from_dimensions(cam_config.resolution[0], cam_config.resolution[1])
@@ -354,39 +405,13 @@ def create_sources(
                 cam_config.output_resolution[0], cam_config.output_resolution[1]
             )
 
-        # Enable RGB-D if this camera is in nvblox_cameras list and is stereo
-        enable_rgbd = (cam_config.ip in nvblox_camera_ips) and cam_config.stereo
+        # Enable RGB-D if this camera is in nvblox_cameras list (must be stereo, validated above)
+        enable_rgbd = cam_config.ip in nvblox_camera_ips
 
         # Create RGB-D config if enabled
         rgbd_camera_config = None
         if enable_rgbd:
-            # RGB-D resolutions (optional)
-            rgb_sensor_resolution = None
-            if cam_config.rgb_sensor_resolution is not None:
-                rgb_sensor_resolution = LuxonisResolution.from_dimensions(
-                    cam_config.rgb_sensor_resolution[0], cam_config.rgb_sensor_resolution[1]
-                )
-            # Will auto-select if None
-
-            rgb_output_resolution = None
-            if cam_config.rgb_output_resolution is not None:
-                rgb_output_resolution = LuxonisResolution.from_dimensions(
-                    cam_config.rgb_output_resolution[0], cam_config.rgb_output_resolution[1]
-                )
-
-            depth_input_resolution = None  # Defaults to mono_sensor_resolution
-            depth_output_resolution = None  # Defaults to rgb_output_resolution when aligned
-
-            rgbd_camera_config = LuxonisRGBDCameraConfig(
-                enable_rgbd=True,
-                depth_input_resolution=depth_input_resolution,
-                rgb_sensor_resolution=rgb_sensor_resolution,
-                rgb_output_resolution=rgb_output_resolution,
-                depth_output_resolution=depth_output_resolution,
-                depth_preset=dai.node.StereoDepth.PresetMode.HIGH_DETAIL,
-                depth_lr_check=True,
-                depth_align_to_rgb=True,
-            )
+            rgbd_camera_config = create_rgbd_config(cam_config, mono_sensor_resolution)
 
         luxonis_config = LuxonisCameraConfig(
             ip=cam_config.ip,

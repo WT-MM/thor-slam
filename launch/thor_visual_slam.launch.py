@@ -6,7 +6,8 @@ from launch_ros.descriptions import ComposableNode
 import launch
 
 
-def generate_launch_description():
+def generate_launch_description() -> launch.LaunchDescription:
+    """Generate launch description for visual slam."""
     num_cameras = LaunchConfiguration('num_cameras')
     rectified_images = LaunchConfiguration('rectified_images')
     enable_imu_fusion = LaunchConfiguration('enable_imu_fusion')
@@ -78,17 +79,20 @@ def generate_launch_description():
         DeclareLaunchArgument('debug_imu_mode', default_value='False'),
         DeclareLaunchArgument('verbosity', default_value='1'),
         DeclareLaunchArgument('multicam_mode', default_value='1'),
-        DeclareLaunchArgument('gyroscope_noise_density', default_value='8.27e-5', description='Gyroscope noise density (rad/s/√Hz)'),
-        DeclareLaunchArgument('accelerometer_noise_density', default_value='2.553e-3', description='Accelerometer noise density (m/s²/√Hz)'),
-        DeclareLaunchArgument('gyroscope_random_walk', default_value='0.00000001', description='Gyroscope random walk (rad/s²/√Hz)'),
-        DeclareLaunchArgument('accelerometer_random_walk', default_value='0.00010493', description='Accelerometer random walk (m/s³/√Hz)'),
+        DeclareLaunchArgument('gyroscope_noise_density', default_value='8.27e-5',
+        description='Gyroscope noise density (rad/s/√Hz)',
+        ),
+        DeclareLaunchArgument('accelerometer_noise_density', default_value='2.553e-3',
+        description='Accelerometer noise density (m/s²/√Hz)',
+        ),
+        DeclareLaunchArgument('gyroscope_random_walk', default_value='0.00000001',
+        description='Gyroscope random walk (rad/s²/√Hz)',
+        ),
+        DeclareLaunchArgument('accelerometer_random_walk', default_value='0.00010493',
+        description='Accelerometer random walk (m/s³/√Hz)',
+        ),
         container,
     ])
-"""
-Datasheet values for BNO085:
-        DeclareLaunchArgument('gyroscope_noise_density', default_value='2.44e-4', description='Gyroscope noise density (rad/s/√Hz)'),
-        DeclareLaunchArgument('accelerometer_noise_density', default_value='1.47e-3', description='Accelerometer noise density (m/s²/√Hz)'),
-"""
 
 """
 Values from 2.5 hr rosbag:

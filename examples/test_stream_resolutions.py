@@ -17,8 +17,8 @@ from askin import KeyboardController
 from thor_slam.camera.drivers.luxonis import (
     LuxonisCameraConfig,
     LuxonisCameraSource,
-    LuxonisRGBDCameraConfig,
     LuxonisResolution,
+    LuxonisRGBDCameraConfig,
 )
 
 # Global shutdown flag

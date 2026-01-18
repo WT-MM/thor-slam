@@ -1,7 +1,7 @@
 """Driver for Luxonis cameras."""
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import timedelta
 from typing import Self, TypedDict, cast
 
@@ -97,15 +97,11 @@ class LuxonisRGBDCameraConfig:
     depth_input_resolution: LuxonisResolution | None = None  # Optional: resize mono frames to this before StereoDepth
 
     enable_rgbd: bool = False
-    rgb_sensor_resolution: LuxonisResolution = field(
-        default_factory=lambda: LuxonisResolution(width=1280, height=720)
-    )  # Actual CAM_A sensor mode (auto-selected if None)
-    rgb_output_resolution: LuxonisResolution = field(
-        default_factory=lambda: LuxonisResolution(width=1280, height=720)
-    )  # Published RGB resolution for nvblox
-    depth_output_resolution: LuxonisResolution = field(
-        default_factory=lambda: LuxonisResolution(width=1280, height=720)
-    )  # Published depth resolution (must match rgb_output if aligned)
+    rgb_sensor_resolution: LuxonisResolution | None = None  # Actual CAM_A sensor mode (auto-selected if None)
+    rgb_output_resolution: LuxonisResolution | None = None  # Published RGB resolution for nvblox (auto-set if None)
+    depth_output_resolution: LuxonisResolution | None = (
+        None  # Published depth resolution (auto-set to match rgb_output if aligned)
+    )
 
     rgbd_sync: bool = True  # Provide a synced RGB+depth stream via Sync node
     rgbd_sync_threshold_ms: int = 50
