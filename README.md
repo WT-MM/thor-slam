@@ -85,11 +85,18 @@ The rest of the system is just configs and ai-generated scripts to run the syste
   - Pose estimation and tracking state management
   - Coordinate frame transformations (RDF to FLU)
 
-- **`scripts/run_pipeline.py`**: Main production script that:
+- **`scripts/run_slam.py`**: SLAM-only script that:
+  - Initializes cameras from config
+  - Publishes stereo frames for SLAM
+  - Publishes IMU data for cuVSLAM
+  - Works with Isaac ROS cuVSLAM node
+
+- **`scripts/run_pipeline.py`**: Main script that:
   - Initializes multiple cameras from config
   - Publishes stereo frames for SLAM
   - Publishes RGB-D frames for nvblox (if enabled)
   - Manages camera lifecycle and error handling
+  - Doesn't really work yet
 
 
 ### Useful tips
@@ -98,11 +105,11 @@ The rest of the system is just configs and ai-generated scripts to run the syste
 
 Config used for test stand:
 ```json
-    {
-    "url": "https://cad.onshape.com/documents/e3ab336faaf474d905c762d1/w/f935c8f9134246c5618007f3/e/354246bd5503e2a6863246a1",
-    "filetype": "mjcf",
-    "create_centroid_links": true
-    }
+{
+"url": "https://cad.onshape.com/documents/e3ab336faaf474d905c762d1/w/f935c8f9134246c5618007f3/e/354246bd5503e2a6863246a1",
+"filetype": "mjcf",
+"create_centroid_links": true
+}
 ```
 
 See `examples/pull_extrinsics.py` for an example of pulling extrinsics from the urdf.
