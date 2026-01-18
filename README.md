@@ -86,10 +86,9 @@ The rest of the system is just configs and ai-generated scripts to run the syste
   - Coordinate frame transformations (RDF to FLU)
 
 - **`scripts/run_slam.py`**: SLAM-only script that:
-  - Initializes cameras from config
-  - Publishes stereo frames for SLAM
-  - Publishes IMU data for cuVSLAM
-  - Works with Isaac ROS cuVSLAM node
+  - Initializes cameras from config (see `config/slam_config.yaml`)
+  - Publishes stereo frames and IMU data for cuVSLAM
+  - Works with Isaac ROS cuVSLAM node (see `launch/thor_visual_slam.launch.py`)
 
 - **`scripts/run_pipeline.py`**: Main script that:
   - Initializes multiple cameras from config
@@ -113,6 +112,8 @@ Config used for test stand:
 ```
 
 See `examples/pull_extrinsics.py` for an example of pulling extrinsics from the urdf.
+
+Important to note that for SLAM, NUM_CAMERAS refers to the number of camera streams (so stereo camera sources will count for 2)
 
 
 ### Setting up isaac ros visual slam
