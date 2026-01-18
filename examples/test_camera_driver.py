@@ -136,7 +136,7 @@ def test_stereo_camera(ip: str, resolution_name: str = "1200", fps: int = 30) ->
         config = LuxonisCameraConfig(
             ip=ip,
             stereo=True,
-            resolution=LuxonisResolution.from_name(resolution_name),
+            mono_sensor_resolution=LuxonisResolution.from_name(resolution_name),
             fps=fps,
             queue_size=8,
             queue_blocking=False,
@@ -256,7 +256,7 @@ def test_mono_camera(ip: str, resolution_name: str = "1200", fps: int = 30) -> N
         config = LuxonisCameraConfig(
             ip=ip,
             stereo=False,
-            resolution=LuxonisResolution.from_name(resolution_name),
+            mono_sensor_resolution=LuxonisResolution.from_name(resolution_name),
             fps=fps,
             queue_size=8,
             queue_blocking=False,
@@ -418,7 +418,7 @@ def test_multiple_cameras(ips: list[str], mode: str, resolution_name: str = "120
             config = LuxonisCameraConfig(
                 ip=ip,
                 stereo=(mode == "stereo"),
-                resolution=LuxonisResolution.from_name(resolution_name),
+                mono_sensor_resolution=LuxonisResolution.from_name(resolution_name),
                 fps=fps,
                 queue_size=8,
                 queue_blocking=False,
@@ -637,7 +637,7 @@ def main() -> None:
         "--resolution",
         type=str,
         default="720",
-        help="Resolution name (default: 720). Options: 720, 800, 400, 480, 1200, 4000x3000, 4224x3136",
+        help="Resolution name (default: 720, works with OAK-D Pro W). Options: 720, 800, 400, 480, 1200, 4000x3000, 4224x3136",
     )
     parser.add_argument("--fps", type=int, default=30, help="Frames per second (default: 30)")
 

@@ -90,6 +90,32 @@ class LuxonisResolution:
 
 
 @dataclass
+class LuxonisRGBDCameraConfig:
+    """Configuration for Luxonis RGB-D cameras."""
+
+    # RGB-D streams (requires stereo=True)\
+    depth_input_resolution: LuxonisResolution | None = None  # Optional: resize mono frames to this before StereoDepth
+
+    enable_rgbd: bool = False
+    rgb_sensor_resolution: LuxonisResolution | None = None  # Actual CAM_A sensor mode (auto-selected if None)
+    rgb_output_resolution: LuxonisResolution | None = None  # Published RGB resolution for nvblox (auto-set if None)
+    depth_output_resolution: LuxonisResolution | None = (
+        None  # Published depth resolution (auto-set to match rgb_output if aligned)
+    )
+
+    rgbd_sync: bool = True  # Provide a synced RGB+depth stream via Sync node
+    rgbd_sync_threshold_ms: int = 50
+    rgbd_sync_attempts: int = 10
+
+    # StereoDepth configuration (used for RGB-D depth)
+    depth_preset: dai.node.StereoDepth.PresetMode = dai.node.StereoDepth.PresetMode.HIGH_DETAIL
+    depth_lr_check: bool = True  # Required for depth alignment
+    depth_subpixel: bool = False
+    depth_extended_disparity: bool = False
+    depth_align_to_rgb: bool = True  # If True, aligns depth to CAM_A (depth_output must match rgb_output)
+
+
+@dataclass
 class LuxonisCameraConfig:
     """Configuration for Luxonis cameras.
 
@@ -109,54 +135,10 @@ class LuxonisCameraConfig:
     imu_raw: bool = False  # If True, returns raw IMU data
 
     # Mono/stereo sensor and output resolutions
-    # Backward compatibility: 'resolution' maps to mono_sensor_resolution
-    resolution: LuxonisResolution | None = None  # DEPRECATED: use mono_sensor_resolution
     mono_sensor_resolution: LuxonisResolution | None = None  # Actual CAM_B/C sensor mode for depth quality
-    slam_output_resolution: LuxonisResolution | None = None  # Published resolution for SLAM left/right
-    depth_input_resolution: LuxonisResolution | None = None  # Optional: resize mono frames to this before StereoDepth
+    output_resolution: LuxonisResolution | None = None  # Published resolution for SLAM left/right
 
-    # Backward compatibility: 'output_resolution' maps to slam_output_resolution
-    output_resolution: LuxonisResolution | None = None  # DEPRECATED: use slam_output_resolution
-
-    # RGB-D streams (requires stereo=True)
-    enable_rgbd: bool = False
-    rgb_sensor_resolution: LuxonisResolution | None = None  # Actual CAM_A sensor mode (auto-selected if None)
-    rgb_output_resolution: LuxonisResolution | None = None  # Published RGB resolution for nvblox
-    depth_output_resolution: LuxonisResolution | None = (
-        None  # Published depth resolution (must match rgb_output if aligned)
-    )
-
-    # Backward compatibility: 'rgb_resolution' maps to rgb_sensor_resolution
-    rgb_resolution: LuxonisResolution | None = None  # DEPRECATED: use rgb_sensor_resolution
-
-    rgbd_sync: bool = True  # Provide a synced RGB+depth stream via Sync node
-    rgbd_sync_threshold_ms: int = 50
-    rgbd_sync_attempts: int = 10
-
-    # StereoDepth configuration (used for RGB-D depth)
-    depth_preset: dai.node.StereoDepth.PresetMode = dai.node.StereoDepth.PresetMode.HIGH_DETAIL
-    depth_lr_check: bool = True  # Required for depth alignment
-    depth_subpixel: bool = False
-    depth_extended_disparity: bool = False
-    depth_align_to_rgb: bool = True  # If True, aligns depth to CAM_A (depth_output must match rgb_output)
-
-    def __post_init__(self) -> None:
-        """Normalize config fields for backward compatibility."""
-        # Map deprecated 'resolution' to mono_sensor_resolution
-        if self.resolution is not None and self.mono_sensor_resolution is None:
-            self.mono_sensor_resolution = self.resolution
-
-        # Map deprecated 'output_resolution' to slam_output_resolution
-        if self.output_resolution is not None and self.slam_output_resolution is None:
-            self.slam_output_resolution = self.output_resolution
-
-        # Map deprecated 'rgb_resolution' to rgb_sensor_resolution
-        if self.rgb_resolution is not None and self.rgb_sensor_resolution is None:
-            self.rgb_sensor_resolution = self.rgb_resolution
-
-        # Ensure mono_sensor_resolution is set (required)
-        if self.mono_sensor_resolution is None:
-            raise ValueError("mono_sensor_resolution (or legacy 'resolution') must be set")
+    rgbd_camera_config: LuxonisRGBDCameraConfig | None = None
 
 
 class LuxonisCameraSource(CameraSource):
@@ -249,10 +231,11 @@ class LuxonisCameraSource(CameraSource):
                     f"Supported modes: {', '.join([dai_to_camera_sensor_type[m] for m in valid_modes])}"
                 )
 
-        if self.cfg.enable_rgbd:
+        if self.cfg.rgbd_camera_config is not None and self.cfg.rgbd_camera_config.enable_rgbd:
             if not self.cfg.stereo:
                 raise ValueError("RGB-D requires stereo=True (needs CAM_B/C for depth)")
 
+            rgbd_cfg = self.cfg.rgbd_camera_config
             rgb_socket = dai.CameraBoardSocket.CAM_A
             rgb_valid_resolutions = get_luxonis_camera_valid_resolutions(self.device, rgb_socket)
             rgb_valid_modes = get_luxonis_camera_valid_modes(self.device, rgb_socket)
@@ -271,8 +254,8 @@ class LuxonisCameraSource(CameraSource):
 
             # Determine RGB sensor resolution
             # If rgb_sensor_resolution is explicitly set, validate it; otherwise auto-select
-            if self.cfg.rgb_sensor_resolution is not None:
-                rgb_sensor_res = self.cfg.rgb_sensor_resolution.as_tuple()
+            if rgbd_cfg.rgb_sensor_resolution is not None:
+                rgb_sensor_res = rgbd_cfg.rgb_sensor_resolution.as_tuple()
                 if rgb_sensor_res not in rgb_valid_resolutions:
                     supported = [f"{w}x{h}" for w, h in rgb_valid_resolutions]
                     raise ValueError(
@@ -284,7 +267,7 @@ class LuxonisCameraSource(CameraSource):
             else:
                 # Auto-select a valid color sensor resolution
                 # If rgb_output_resolution is specified, prefer sensor resolutions that can support it
-                rgb_output_res = self.cfg.rgb_output_resolution.as_tuple() if self.cfg.rgb_output_resolution else None
+                rgb_output_res = rgbd_cfg.rgb_output_resolution.as_tuple() if rgbd_cfg.rgb_output_resolution else None
                 if self.cfg.mono_sensor_resolution is None:
                     raise ValueError("mono_sensor_resolution must be set")
                 mono_res = self.cfg.mono_sensor_resolution.as_tuple()
@@ -329,40 +312,40 @@ class LuxonisCameraSource(CameraSource):
                 )
 
             # Validate RGB output resolution is set
-            if self.cfg.rgb_output_resolution is None:
+            if rgbd_cfg.rgb_output_resolution is None:
                 # Default to RGB sensor resolution if not specified
-                rgb_output_res_cfg = self.cfg.rgb_sensor_resolution or self._auto_rgb_sensor_resolution
+                rgb_output_res_cfg = rgbd_cfg.rgb_sensor_resolution or self._auto_rgb_sensor_resolution
                 if rgb_output_res_cfg is None:
                     raise ValueError("rgb_output_resolution must be set when enable_rgbd=True")
                 if not isinstance(rgb_output_res_cfg, LuxonisResolution):
                     raise ValueError("rgb_output_resolution must be LuxonisResolution")
-                self.cfg.rgb_output_resolution = rgb_output_res_cfg
+                rgbd_cfg.rgb_output_resolution = rgb_output_res_cfg
 
             # Validate depth output resolution
-            if self.cfg.depth_align_to_rgb:
+            if rgbd_cfg.depth_align_to_rgb:
                 # When aligned, depth output must match RGB output
-                if self.cfg.depth_output_resolution is not None:
-                    if self.cfg.rgb_output_resolution is None:
+                if rgbd_cfg.depth_output_resolution is not None:
+                    if rgbd_cfg.rgb_output_resolution is None:
                         raise ValueError("rgb_output_resolution must be set when depth_align_to_rgb=True")
-                    if self.cfg.depth_output_resolution.as_tuple() != self.cfg.rgb_output_resolution.as_tuple():
+                    if rgbd_cfg.depth_output_resolution.as_tuple() != rgbd_cfg.rgb_output_resolution.as_tuple():
                         raise ValueError(
                             "When depth_align_to_rgb=True, depth_output_resolution (%s) "
                             "must match rgb_output_resolution (%s)"
-                            % (self.cfg.depth_output_resolution, self.cfg.rgb_output_resolution)
+                            % (rgbd_cfg.depth_output_resolution, rgbd_cfg.rgb_output_resolution)
                         )
                 else:
                     # Auto-set to match RGB output
-                    self.cfg.depth_output_resolution = self.cfg.rgb_output_resolution
+                    rgbd_cfg.depth_output_resolution = rgbd_cfg.rgb_output_resolution
 
         # Set defaults for output resolutions
-        if self.cfg.slam_output_resolution is None:
+        if self.cfg.output_resolution is None:
             # Default to mono sensor resolution if not specified
-            self.cfg.slam_output_resolution = self.cfg.mono_sensor_resolution
+            self.cfg.output_resolution = self.cfg.mono_sensor_resolution
 
         # Set depth input resolution default
-        if self.cfg.depth_input_resolution is None:
+        if self.cfg.rgbd_camera_config is not None and self.cfg.rgbd_camera_config.depth_input_resolution is None:
             # Default to mono sensor resolution (use full res for depth)
-            self.cfg.depth_input_resolution = self.cfg.mono_sensor_resolution
+            self.cfg.rgbd_camera_config.depth_input_resolution = self.cfg.mono_sensor_resolution
 
         # Load calibration data
         self._calib_data = self.device.readCalibration()
@@ -386,35 +369,38 @@ class LuxonisCameraSource(CameraSource):
         # Get resolution tuples
         if self.cfg.mono_sensor_resolution is None:
             raise ValueError("mono_sensor_resolution must be set")
-        if self.cfg.slam_output_resolution is None:
-            raise ValueError("slam_output_resolution must be set")
-        if self.cfg.depth_input_resolution is None:
-            raise ValueError("depth_input_resolution must be set")
+        if self.cfg.output_resolution is None:
+            raise ValueError("output_resolution must be set")
         mono_sensor_res = self.cfg.mono_sensor_resolution.as_tuple()
-        slam_output_res = self.cfg.slam_output_resolution.as_tuple()
-        depth_input_res = self.cfg.depth_input_resolution.as_tuple()
+        slam_output_res = self.cfg.output_resolution.as_tuple()
         fps = float(self.cfg.fps)
 
         # RGB-D resolutions (if enabled)
         rgb_sensor_res = None
         rgb_output_res = None
         depth_output_res = None
+        depth_input_res = None
 
-        if self.cfg.enable_rgbd:
+        if self.cfg.rgbd_camera_config is not None and self.cfg.rgbd_camera_config.enable_rgbd:
+            rgbd_cfg = self.cfg.rgbd_camera_config
+            if rgbd_cfg.depth_input_resolution is None:
+                raise ValueError("depth_input_resolution must be set when enable_rgbd=True")
+            depth_input_res = rgbd_cfg.depth_input_resolution.as_tuple()
+
             # Get RGB sensor resolution (explicit or auto-selected)
-            if self.cfg.rgb_sensor_resolution is not None:
-                rgb_sensor_res = self.cfg.rgb_sensor_resolution.as_tuple()
+            if rgbd_cfg.rgb_sensor_resolution is not None:
+                rgb_sensor_res = rgbd_cfg.rgb_sensor_resolution.as_tuple()
             elif hasattr(self, "_auto_rgb_sensor_resolution") and self._auto_rgb_sensor_resolution is not None:
                 rgb_sensor_res = self._auto_rgb_sensor_resolution.as_tuple()
             else:
                 raise RuntimeError("RGB sensor resolution not determined (should have been set in __init__)")
 
-            if self.cfg.rgb_output_resolution is None:
+            if rgbd_cfg.rgb_output_resolution is None:
                 raise ValueError("rgb_output_resolution must be set when enable_rgbd=True")
-            if self.cfg.depth_output_resolution is None:
+            if rgbd_cfg.depth_output_resolution is None:
                 raise ValueError("depth_output_resolution must be set when enable_rgbd=True")
-            rgb_output_res = self.cfg.rgb_output_resolution.as_tuple()
-            depth_output_res = self.cfg.depth_output_resolution.as_tuple()
+            rgb_output_res = rgbd_cfg.rgb_output_resolution.as_tuple()
+            depth_output_res = rgbd_cfg.depth_output_resolution.as_tuple()
 
         resize_mode = dai.ImgResizeMode.LETTERBOX  # Use letterbox to preserve aspect ratio
 
@@ -461,7 +447,9 @@ class LuxonisCameraSource(CameraSource):
             left_depth_in = None
             right_depth_in = None
 
-            if self.cfg.enable_rgbd:
+            if self.cfg.rgbd_camera_config is not None and self.cfg.rgbd_camera_config.enable_rgbd:
+                rgbd_cfg = self.cfg.rgbd_camera_config
+                assert depth_input_res is not None
                 # Request depth input streams from mono cameras (only if RGB-D enabled)
                 if depth_input_res == mono_sensor_res:
                     left_depth_in = left_cam.requestFullResolutionOutput()
@@ -524,18 +512,18 @@ class LuxonisCameraSource(CameraSource):
 
                 # StereoDepth: use depth input streams from mono cameras
                 stereo = self._pipeline.create(dai.node.StereoDepth)
-                stereo.setDefaultProfilePreset(self.cfg.depth_preset)
+                stereo.setDefaultProfilePreset(rgbd_cfg.depth_preset)
                 # Set input resolution to match the actual depth input stream size
                 stereo.setInputResolution(depth_input_res[0], depth_input_res[1])
 
                 left_depth_in.link(stereo.left)
                 right_depth_in.link(stereo.right)
 
-                stereo.setLeftRightCheck(self.cfg.depth_lr_check)
-                stereo.setSubpixel(self.cfg.depth_subpixel)
-                stereo.setExtendedDisparity(self.cfg.depth_extended_disparity)
+                stereo.setLeftRightCheck(rgbd_cfg.depth_lr_check)
+                stereo.setSubpixel(rgbd_cfg.depth_subpixel)
+                stereo.setExtendedDisparity(rgbd_cfg.depth_extended_disparity)
 
-                if self.cfg.depth_align_to_rgb:
+                if rgbd_cfg.depth_align_to_rgb:
                     stereo.setDepthAlign(dai.CameraBoardSocket.CAM_A)
                     # ALWAYS set output size when aligned to avoid expensive upscaling
                     assert depth_output_res is not None
@@ -547,11 +535,11 @@ class LuxonisCameraSource(CameraSource):
                     maxSize=self.cfg.queue_size, blocking=self.cfg.queue_blocking
                 )
 
-                if self.cfg.rgbd_sync:
+                if rgbd_cfg.rgbd_sync:
                     sync = self._pipeline.create(dai.node.Sync)
                     sync.setRunOnHost(True)
-                    sync.setSyncThreshold(timedelta(milliseconds=self.cfg.rgbd_sync_threshold_ms))
-                    sync.setSyncAttempts(self.cfg.rgbd_sync_attempts)
+                    sync.setSyncThreshold(timedelta(milliseconds=rgbd_cfg.rgbd_sync_threshold_ms))
+                    sync.setSyncAttempts(rgbd_cfg.rgbd_sync_attempts)
 
                     rgb_out.link(sync.inputs["rgb"])
                     stereo.depth.link(sync.inputs["depth"])
@@ -606,9 +594,9 @@ class LuxonisCameraSource(CameraSource):
         self._pipeline.start()
 
     def get_intrinsics(self) -> list[Intrinsics]:
-        """Get intrinsics for SLAM output (left/right at slam_output_resolution).
+        """Get intrinsics for SLAM output (left/right at output_resolution).
 
-        If stereo, returns [left, right] at slam_output_resolution.
+        If stereo, returns [left, right] at output_resolution.
         """
         if self._intrinsics is not None:
             return self._intrinsics
@@ -616,11 +604,11 @@ class LuxonisCameraSource(CameraSource):
         intrinsics_list: list[Intrinsics] = []
 
         # Use SLAM output resolution (what we publish for SLAM)
-        if self.cfg.slam_output_resolution is None:
-            raise ValueError("slam_output_resolution must be set")
+        if self.cfg.output_resolution is None:
+            raise ValueError("output_resolution must be set")
         if self.cfg.mono_sensor_resolution is None:
             raise ValueError("mono_sensor_resolution must be set")
-        slam_output = self.cfg.slam_output_resolution
+        slam_output = self.cfg.output_resolution
         mono_sensor = self.cfg.mono_sensor_resolution
 
         # Get intrinsics at sensor resolution, then scale to output
@@ -883,7 +871,7 @@ class LuxonisCameraSource(CameraSource):
     @property
     def has_rgbd_streams(self) -> bool:
         """Check if RGB-D streams are available."""
-        return self.cfg.stereo and self.cfg.enable_rgbd
+        return self.cfg.stereo and self.cfg.rgbd_camera_config is not None and self.cfg.rgbd_camera_config.enable_rgbd
 
     def get_latest_rgbd_frames(self) -> tuple[CameraFrame, CameraFrame]:
         """Get the latest RGB and depth frames (blocking).
@@ -897,7 +885,9 @@ class LuxonisCameraSource(CameraSource):
         if not self.has_rgbd_streams:
             raise RuntimeError("RGB-D streams not enabled. Set enable_rgbd=True and stereo=True.")
 
-        if self.cfg.rgbd_sync and "rgbd" in self._output_queues:
+        rgbd_cfg = self.cfg.rgbd_camera_config
+        assert rgbd_cfg is not None
+        if rgbd_cfg.rgbd_sync and "rgbd" in self._output_queues:
             # Use synced RGB-D stream
             rgbd_group = self._output_queues["rgbd"].get()
             rgb_data = rgbd_group["rgb"]  # type: ignore[index]
@@ -942,7 +932,9 @@ class LuxonisCameraSource(CameraSource):
         if not self.has_rgbd_streams:
             return None
 
-        if self.cfg.rgbd_sync and "rgbd" in self._output_queues:
+        rgbd_cfg = self.cfg.rgbd_camera_config
+        assert rgbd_cfg is not None
+        if rgbd_cfg.rgbd_sync and "rgbd" in self._output_queues:
             # Use synced RGB-D stream
             rgbd_group = self._output_queues["rgbd"].tryGet()
             if rgbd_group is None:
@@ -988,20 +980,23 @@ class LuxonisCameraSource(CameraSource):
         if not self.has_rgbd_streams:
             raise RuntimeError("RGB-D streams not enabled. Set enable_rgbd=True and stereo=True.")
 
+        rgbd_cfg = self.cfg.rgbd_camera_config
+        assert rgbd_cfg is not None
+
         # Get RGB sensor and output resolutions
-        if self.cfg.rgb_sensor_resolution is not None:
-            rgb_sensor_res = self.cfg.rgb_sensor_resolution
+        if rgbd_cfg.rgb_sensor_resolution is not None:
+            rgb_sensor_res = rgbd_cfg.rgb_sensor_resolution
         elif hasattr(self, "_auto_rgb_sensor_resolution") and self._auto_rgb_sensor_resolution is not None:
             rgb_sensor_res = self._auto_rgb_sensor_resolution
         else:
             raise RuntimeError("RGB sensor resolution not determined")
 
-        if self.cfg.rgb_output_resolution is None:
+        if rgbd_cfg.rgb_output_resolution is None:
             raise ValueError("rgb_output_resolution must be set when enable_rgbd=True")
-        if self.cfg.depth_output_resolution is None:
+        if rgbd_cfg.depth_output_resolution is None:
             raise ValueError("depth_output_resolution must be set when enable_rgbd=True")
-        rgb_output_res = self.cfg.rgb_output_resolution
-        depth_output_res = self.cfg.depth_output_resolution
+        rgb_output_res = rgbd_cfg.rgb_output_resolution
+        depth_output_res = rgbd_cfg.depth_output_resolution
 
         # RGB intrinsics (CAM_A) - get at sensor resolution, scale to output
         rgb_matrix = np.array(
@@ -1020,7 +1015,7 @@ class LuxonisCameraSource(CameraSource):
         rgb_coeffs = np.array(self._calib_data.getDistortionCoefficients(dai.CameraBoardSocket.CAM_A))
 
         # Depth intrinsics
-        if self.cfg.depth_align_to_rgb:
+        if rgbd_cfg.depth_align_to_rgb:
             # When aligned, depth intrinsics match RGB (same K and D) at depth output resolution
             # Since depth_output must equal rgb_output when aligned, they should be the same
             if depth_output_res.width != rgb_output_res.width or depth_output_res.height != rgb_output_res.height:

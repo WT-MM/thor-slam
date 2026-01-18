@@ -1,7 +1,8 @@
-"""Test script for CameraRig - tests multi-camera synchronization."""
+"""Test CameraRig - synchronize multiple cameras and display synchronized frames."""
 
 import argparse
 import asyncio
+import signal
 import sys
 import threading
 import time
@@ -14,7 +15,11 @@ import depthai as dai
 import numpy as np
 from askin import KeyboardController
 
-from thor_slam.camera.drivers.luxonis import LuxonisCameraConfig, LuxonisCameraSource, LuxonisResolution
+from thor_slam.camera.drivers.luxonis import (
+    LuxonisCameraConfig,
+    LuxonisCameraSource,
+    LuxonisResolution,
+)
 from thor_slam.camera.rig import CameraRig
 from thor_slam.camera.types import IPv4
 from thor_slam.camera.utils import (
@@ -22,6 +27,16 @@ from thor_slam.camera.utils import (
     get_luxonis_camera_valid_resolutions,
     get_luxonis_device,
 )
+
+# Global shutdown flag
+_shutdown = False
+
+
+def signal_handler(sig: int, frame: object) -> None:
+    """Handle shutdown signal."""
+    global _shutdown
+    _shutdown = True
+    print("\nShutting down...")
 
 
 def find_available_cameras() -> list[dai.DeviceInfo]:
@@ -84,6 +99,46 @@ def setup_quit_listener() -> tuple[threading.Event, Callable[[], None]]:
     return quit_event, cleanup
 
 
+def draw_info(
+    img: np.ndarray,
+    fps: float,
+    info: dict[str, str] | None = None,
+    label: str | None = None,
+    resolution: tuple[int, int] | None = None,
+) -> np.ndarray:
+    """Draw info overlay on image."""
+    img_copy = img.copy()
+    y_offset = 30
+    line_height = 30
+
+    # FPS
+    cv2.putText(img_copy, f"FPS: {fps:.1f}", (10, y_offset), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+
+    # Label and resolution (for stereo mode)
+    if label and resolution:
+        y_offset += line_height
+        cv2.putText(
+            img_copy,
+            f"{label}: {resolution[0]}x{resolution[1]}",
+            (10, y_offset),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.7,
+            (0, 255, 0),
+            2,
+        )
+
+    # Additional info (for RGB-D mode)
+    if info:
+        y_offset += line_height
+        for key, value in info.items():
+            cv2.putText(
+                img_copy, f"{key}: {value}", (10, y_offset), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 2
+            )
+            y_offset += line_height
+
+    return img_copy
+
+
 def calculate_fps(frame_times: list[float], window_size: int = 30) -> float:
     """Calculate FPS from recent frame times."""
     if len(frame_times) < 2:
@@ -97,68 +152,6 @@ def calculate_fps(frame_times: list[float], window_size: int = 30) -> float:
     return (len(recent_times) - 1) / time_diff
 
 
-def draw_info(
-    img: np.ndarray,
-    fps: float,
-    timestamp: float,
-    sync_delta: float | None = None,
-    source_name: str = "",
-) -> np.ndarray:
-    """Draw info overlay on image."""
-    img_copy = img.copy()
-    y_offset = 30
-    line_height = 40
-
-    # FPS
-    cv2.putText(
-        img_copy,
-        f"FPS: {fps:.1f}",
-        (10, y_offset),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        0.7,
-        (0, 255, 0),
-        2,
-    )
-
-    # Source name
-    if source_name:
-        cv2.putText(
-            img_copy,
-            f"Source: {source_name}",
-            (10, y_offset + line_height),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.6,
-            (255, 255, 0),
-            2,
-        )
-
-    # Timestamp
-    cv2.putText(
-        img_copy,
-        f"TS: {timestamp:.3f}s",
-        (10, y_offset + line_height * 2),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        0.6,
-        (255, 255, 255),
-        2,
-    )
-
-    # Sync delta (if provided)
-    if sync_delta is not None:
-        color = (0, 255, 0) if abs(sync_delta) < 0.01 else (0, 165, 255) if abs(sync_delta) < 0.05 else (0, 0, 255)
-        cv2.putText(
-            img_copy,
-            f"Sync Δ: {sync_delta * 1000:.1f}ms",
-            (10, y_offset + line_height * 3),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.6,
-            color,
-            2,
-        )
-
-    return img_copy
-
-
 def resize_for_display(img: np.ndarray, max_width: int) -> np.ndarray:
     """Resize image to max width while maintaining aspect ratio."""
     h, w = img.shape[:2]
@@ -170,7 +163,7 @@ def resize_for_display(img: np.ndarray, max_width: int) -> np.ndarray:
     return cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_AREA)
 
 
-def test_camera_rig(
+def run_camera_rig(
     ips: list[str],
     fps: int = 30,
     queue_size: int = 30,
@@ -222,6 +215,8 @@ def test_camera_rig(
             )
             print(f"  {ip}: STEREO mode, {len(valid_resolutions)} resolution(s), sensor: {preferred_sensor_type}")
             device.close()
+            # Wait a bit after closing device to allow it to become available again
+            time.sleep(0.5)
 
         # Find intersection of all valid resolutions and pick the SMALLEST
         all_resolutions = [cap["resolutions"] for cap in camera_capabilities]
@@ -245,13 +240,16 @@ def test_camera_rig(
             selected_resolutions = [selected_resolution]
             print(f"✓ Selected resolution: {selected_resolution[0]}x{selected_resolution[1]}")
 
+        # Wait a bit before initializing cameras to ensure devices are ready
+        print("\nWaiting for devices to be ready...")
+        time.sleep(5.0)
+
         # Create camera sources
         sources: list[LuxonisCameraSource] = []
         for i, ip in enumerate(ips):
             print(f"\nInitializing camera {ip}...")
             selected_res = selected_resolutions[i]
             resolution = LuxonisResolution.from_dimensions(selected_res[0], selected_res[1])
-            resolution = LuxonisResolution.from_name("800")
             # Get preferred sensor type (MONO if available, else COLOR)
             cap = camera_capabilities[i]
             sensor_type = cap["sensor_type"]
@@ -259,7 +257,7 @@ def test_camera_rig(
             config = LuxonisCameraConfig(
                 ip=ip,
                 stereo=True,
-                resolution=resolution,
+                mono_sensor_resolution=resolution,
                 fps=fps,
                 queue_size=8,
                 queue_blocking=False,
@@ -268,6 +266,9 @@ def test_camera_rig(
             camera = LuxonisCameraSource(config)
             sources.append(camera)
             print(f"  ✓ Camera {ip} initialized: {selected_res[0]}x{selected_res[1]} @ STEREO ({sensor_type})")
+            # Small wait between camera initializations
+            if i < len(ips) - 1:
+                time.sleep(0.3)
 
         # Create rig
         print(f"\nCreating CameraRig with {len(sources)} source(s)...")
@@ -301,7 +302,7 @@ def test_camera_rig(
         frame_count = 0
         last_print_time = time.time()
 
-        while not quit_event.is_set():
+        while not quit_event.is_set() and not _shutdown:
             try:
                 # Get synchronized frames
                 sync_set = rig.get_synchronized_frames()
@@ -333,12 +334,6 @@ def test_camera_rig(
                         # Calculate sync delta for this frame
                         frame_sync_delta = frame.timestamp - sync_set.timestamp
 
-                        if frame_count % 50 == 0:
-
-                            print(f"Frame timestamp: {frame.timestamp}")
-                            print(f"Sync set timestamp: {sync_set.timestamp}")
-                            print(f"Frame sync delta: {frame_sync_delta}")
-
                         # Prepare image for display
                         if len(frame.image.shape) == 2:
                             img = cv2.cvtColor(frame.image, cv2.COLOR_GRAY2BGR)
@@ -348,8 +343,9 @@ def test_camera_rig(
                         # Resize for display
                         img = resize_for_display(img, 640)
 
-                        # Draw info
-                        img = draw_info(img, camera_fps, frame.timestamp, frame_sync_delta, source_name)
+                        # Draw info - create info dict for rig mode
+                        info_dict = {source_name: f"{frame.image.shape[1]}x{frame.image.shape[0]}"}
+                        img = draw_info(img, camera_fps, info_dict)
 
                         # Add to display dict
                         display_images[camera_key] = img
@@ -358,19 +354,6 @@ def test_camera_rig(
                 if display_images:
                     for window_name, img in display_images.items():
                         cv2.imshow(window_name, img)
-
-                # Print statistics periodically
-                # if current_time - last_print_time >= 1.0:
-                #     queue_depths = rig.get_queue_depths()
-                #     avg_sync_delta = sum(sync_deltas[-30:]) / len(sync_deltas[-30:]) if sync_deltas else 0.0
-                #     max_sync_delta = max(sync_deltas[-30:]) if sync_deltas else 0.0
-
-                #     print(
-                #         f"Frames: {frame_count} | "
-                #         f"Sync Δ: avg={avg_sync_delta * 1000:.1f}ms, max={max_sync_delta * 1000:.1f}ms | "
-                #         f"Queues: {queue_depths}"
-                #     )
-                #     last_print_time = current_time
 
                 # Process OpenCV events
                 cv2.waitKey(1)
@@ -446,18 +429,15 @@ def interactive_select_cameras() -> list[str] | None:
 
 def main() -> None:
     """Main entry point."""
-    parser = argparse.ArgumentParser(description="Test CameraRig synchronization")
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+
+    parser = argparse.ArgumentParser(description="Test CameraRig with multiple cameras")
     parser.add_argument(
         "--ips",
         type=str,
         nargs="+",
-        help="Camera IP addresses (interactive selection if not provided)",
-    )
-    parser.add_argument(
-        "--fps",
-        type=int,
-        default=30,
-        help="FPS (default: 10)",
+        help="Camera IP addresses. Interactive selection if not provided.",
     )
     parser.add_argument(
         "--queue-size",
@@ -465,27 +445,35 @@ def main() -> None:
         default=15,
         help="Queue size for each camera (default: 15)",
     )
+    parser.add_argument(
+        "--fps",
+        type=int,
+        default=30,
+        help="FPS (default: 30)",
+    )
 
     args = parser.parse_args()
 
-    # Get camera IPs
-    if args.ips:
-        camera_ips = args.ips
-    else:
-        camera_ips = interactive_select_cameras()
-        if camera_ips is None:
+    try:
+        if args.ips:
+            camera_ips = args.ips
+        else:
+            camera_ips = interactive_select_cameras()
+            if camera_ips is None:
+                sys.exit(1)
+
+        if len(camera_ips) < 1:
+            print("Need at least one camera!")
             sys.exit(1)
 
-    if len(camera_ips) < 1:
-        print("Need at least one camera!")
-        sys.exit(1)
+        run_camera_rig(camera_ips, fps=args.fps, queue_size=args.queue_size)
 
-    try:
-        test_camera_rig(camera_ips, fps=args.fps, queue_size=args.queue_size)
     except KeyboardInterrupt:
         print("\n\nInterrupted by user")
         cv2.destroyAllWindows()
+        sys.exit(0)
 
 
 if __name__ == "__main__":
     main()
+
