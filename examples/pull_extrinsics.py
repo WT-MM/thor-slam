@@ -24,10 +24,10 @@ rig_extrinsics = load_rig_extrinsics_from_urdf(
 )
 
 my_sources = [
-    LuxonisCameraSource(cfg=LuxonisCameraConfig(ip="192.168.2.21", resolution=LuxonisResolution.from_name("720"), stereo=False, fps=10)),
-    LuxonisCameraSource(cfg=LuxonisCameraConfig(ip="192.168.2.22", resolution=LuxonisResolution.from_name("720"), stereo=True, fps=10)),
-    LuxonisCameraSource(cfg=LuxonisCameraConfig(ip="192.168.2.23", resolution=LuxonisResolution.from_name("1200"), stereo=True, fps=10, camera_mode="COLOR")),
-    LuxonisCameraSource(cfg=LuxonisCameraConfig(ip="192.168.2.25", resolution=LuxonisResolution.from_name("720"), stereo=True, fps=10)),
+    LuxonisCameraSource(cfg=LuxonisCameraConfig(ip="192.168.2.21", mono_sensor_resolution=LuxonisResolution.from_name("720"), stereo=False, fps=10)),
+    LuxonisCameraSource(cfg=LuxonisCameraConfig(ip="192.168.2.22", mono_sensor_resolution=LuxonisResolution.from_name("720"), stereo=True, fps=10)),
+    LuxonisCameraSource(cfg=LuxonisCameraConfig(ip="192.168.2.23", mono_sensor_resolution=LuxonisResolution.from_name("1200"), stereo=True, fps=10, camera_mode="COLOR")),
+    LuxonisCameraSource(cfg=LuxonisCameraConfig(ip="192.168.2.25", mono_sensor_resolution=LuxonisResolution.from_name("720"), stereo=True, fps=10)),
 ]
 
 my_sources[0].__delattr__

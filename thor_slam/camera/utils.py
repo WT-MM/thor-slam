@@ -52,6 +52,50 @@ def get_luxonis_camera_valid_resolutions(device: dai.Device, socket: dai.CameraB
     return []
 
 
+def prompt_for_resolution(
+    device: dai.Device,
+    socket: dai.CameraBoardSocket,
+    prompt_message: str = "Select a resolution:",
+) -> tuple[int, int]:
+    """Interactively prompt the user to select a resolution from available options.
+
+    Args:
+        device: The Luxonis device to query for resolutions.
+        socket: The camera socket to query (CAM_A, CAM_B, or CAM_C).
+        prompt_message: Custom message to display before the resolution list.
+
+    Returns:
+        Selected resolution as (width, height) tuple.
+
+    Raises:
+        ValueError: If no valid resolutions are found or user input is invalid.
+    """
+    valid_resolutions = get_luxonis_camera_valid_resolutions(device, socket)
+    if not valid_resolutions:
+        raise ValueError(f"No valid resolutions found for socket {socket}")
+
+    print(f"\n{prompt_message}")
+    print("Available resolutions:")
+    for i, (width, height) in enumerate(valid_resolutions, start=1):
+        print(f"  {i}. {width}x{height}")
+
+    while True:
+        try:
+            choice = input(f"\nEnter choice (1-{len(valid_resolutions)}): ").strip()
+            index = int(choice) - 1
+            if 0 <= index < len(valid_resolutions):
+                selected = valid_resolutions[index]
+                print(f"Selected: {selected[0]}x{selected[1]}\n")
+                return selected
+            else:
+                print(f"Invalid choice. Please enter a number between 1 and {len(valid_resolutions)}.")
+        except ValueError:
+            print("Invalid input. Please enter a number.")
+        except (KeyboardInterrupt, EOFError):
+            print("\nCancelled by user.")
+            raise
+
+
 # TODO: write tests to make sure this is correct.
 # e.g. make an onshape with something 1m in x, 0.5m in y, 0.25m in z and check the transform. Also check roll pitch yaw.
 def parse_urdf_transform(joint_elem: ET.Element) -> np.ndarray:

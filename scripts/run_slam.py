@@ -1,4 +1,4 @@
-"""Run SLAM with# Isaac ROS Visual SLAM.
+"""Run SLAM with Isaac ROS Visual SLAM.
 
 Publishes camera frames to:
   /visual_slam/image_0, /visual_slam/image_1, ...
@@ -150,7 +150,9 @@ def create_sources(config: SlamConfig) -> tuple[dict[str, LuxonisCameraSource], 
         luxonis_config = LuxonisCameraConfig(
             ip=cam_config.ip,
             stereo=cam_config.stereo,
-            resolution=LuxonisResolution.from_dimensions(cam_config.resolution[0], cam_config.resolution[1]),
+            mono_sensor_resolution=LuxonisResolution.from_dimensions(
+                cam_config.resolution[0], cam_config.resolution[1]
+            ),
             fps=config.fps,
             queue_size=config.queue_size,
             queue_blocking=False,
